@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simply Say - Secure Admin Console</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --accent: #6366f1;
+            --accent-hover: #4f46e5;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+            --success: #10b981;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 2rem;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-badge {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            padding: 0.4rem 0.8rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--success);
+            border-radius: 50%;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text-main);
+        }
+
+        .form-group {
+            margin-bottom: 1.2rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-bottom: 0.4rem;
+        }
+
+        input, textarea {
+            width: 100%;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input:focus, textarea:focus {
+            border-color: var(--accent);
+        }
+
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 0.75rem 1.5rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background: var(--accent-hover);
+        }
+
+        .alert {
+            margin-top: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+
+        .alert-error {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid #ef4444;
+            color: #ef4444;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+        }
+
+        .info-box {
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .info-box span {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .info-box p {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-top: 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">Simply Say Admin</div>
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                Server Active
+            </div>
+        </header>
+
+        <div class="card">
+            <h2 class="card-title">Server Overview</h2>
+            <div class="info-grid">
+                <div class="info-box">
+                    <span>Architecture Mode</span>
+                    <p>Zero-Server-Storage</p>
+                </div>
+                <div class="info-box">
+                    <span>FCM Admin Status</span>
+                    <p id="fcm-status">{{ 'Initialized' if fcm_active else 'Credentials Missing' }}</p>
+                </div>
+                <div class="info-box">
+                    <span>User Data Location</span>
+                    <p>User Devices Only</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">FCM Admin Push Dispatcher</h2>
+            <form id="fcm-form">
+                <div class="form-group">
+                    <label for="token">Device FCM Token</label>
+                    <input type="text" id="token" placeholder="Paste target device FCM token..." required>
+                </div>
+                <div class="form-group">
+                    <label for="title">Notification Title</label>
+                    <input type="text" id="title" value="Simply Say System Alert" required>
+                </div>
+                <div class="form-group">
+                    <label for="body">Notification Body</label>
+                    <textarea id="body" rows="3" required>Test notification from Simply Say Admin Console.</textarea>
+                </div>
+                <button type="submit">Send Notification</button>
+            </form>
+            <div id="alert-box" class="alert"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('fcm-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const token = document.getElementById('token').value;
+            const title = document.getElementById('title').value;
+            const body = document.getElementById('body').value;
+            const alertBox = document.getElementById('alert-box');
+
+            try {
+                const res = await fetch('/admin/send-notification', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token, title, body })
+                });
+                const data = await res.json();
+
+                alertBox.style.display = 'block';
+                if (data.success) {
+                    alertBox.className = 'alert alert-success';
+                    alertBox.innerText = `Notification sent successfully! Message ID: ${data.message_id}`;
+                } else {
+                    alertBox.className = 'alert alert-error';
+                    alertBox.innerText = `Failed: ${data.error}`;
+                }
+            } catch (err) {
+                alertBox.style.display = 'block';
+                alertBox.className = 'alert alert-error';
+                alertBox.innerText = `Error: ${err.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

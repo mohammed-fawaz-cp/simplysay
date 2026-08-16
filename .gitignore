@@ -1,0 +1,67 @@
+# Environment variables & secrets
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.cert
+
+# Design assets & documentation
+desigh theory/
+design theory/
+*.fig
+*.sketch
+*.psd
+*.ai
+
+# Build outputs, APKs, App Bundles & Binaries
+*.apk
+*.aab
+*.dex
+*.ipa
+*.app
+*.xcarchive
+build/
+**/build/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+app.*.symbols
+app.*.map.json
+
+# Python & FastAPI Server
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+ENV/
+env/
+*.sqlite
+*.db
+*.log
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+*.swo
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

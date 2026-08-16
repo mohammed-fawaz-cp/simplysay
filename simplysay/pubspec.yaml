@@ -1,0 +1,71 @@
+name: simplysay
+description: "Simply Say - Secure P2P communication app"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Icons & UI Utilities
+  cupertino_icons: ^1.0.8
+
+  # 1. MQTT
+  mqtt_client: ^10.0.3
+
+  # 2. Firebase Cloud Messaging (FCM)
+  firebase_core: ^3.12.1
+  firebase_messaging: ^15.2.4
+
+  # 3. WebRTC
+  flutter_webrtc: ^0.12.4
+
+  # 4. State Management (Riverpod)
+  flutter_riverpod: ^2.6.1
+
+  # 5. SQLite (Local Storage - All user data stays on device)
+  sqflite: ^2.4.1
+  sqflite_common_ffi: ^2.3.3
+  path: ^1.9.1
+  path_provider: ^2.1.5
+
+  # Networking & HTTP
+  http: ^1.2.0
+
+  # Contacts
+  flutter_contacts: ^1.1.9
+
+  # 6. LibP2P
+  dart_libp2p: ^0.5.1
+
+  # 7. OAuth & 2FA
+  google_sign_in: ^6.3.0
+  flutter_appauth: ^7.0.0
+  otp: ^3.1.5
+  crypto: ^3.0.6
+
+  # 8. Flutter Local Notifications
+  flutter_local_notifications: ^18.0.1
+
+  # 9. Permission Handler
+  permission_handler: ^11.4.0
+
+  # 10. Camera & Image Picker
+  camera: ^0.11.1
+  image_picker: ^1.1.2
+
+  # Helpers
+  uuid: ^4.5.1
+  device_info_plus: ^11.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
