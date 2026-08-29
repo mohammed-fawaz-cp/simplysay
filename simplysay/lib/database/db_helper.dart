@@ -155,13 +155,21 @@ class DatabaseHelper {
     String? profileImageBase64,
   }) async {
     developer.log('⚡ [DatabaseHelper.saveClientIdentity] Saving identity (cit=$cit, csit=$csit, phone=$phoneNumber)...', name: 'DatabaseHelper');
+    final existing = await getClientIdentity();
+    final resolvedDisplayName = (displayName != null && displayName.isNotEmpty)
+        ? displayName
+        : (existing?['display_name'] as String?);
+    final resolvedImage = (profileImageBase64 != null && profileImageBase64.isNotEmpty)
+        ? profileImageBase64
+        : (existing?['profile_image_base64'] as String?);
+
     final data = {
       'cit': cit,
       'csit': csit,
       'device_id': deviceId,
       'phone_number': phoneNumber,
-      'display_name': displayName,
-      'profile_image_base64': profileImageBase64,
+      'display_name': resolvedDisplayName,
+      'profile_image_base64': resolvedImage,
       'created_at': DateTime.now().millisecondsSinceEpoch,
     };
 

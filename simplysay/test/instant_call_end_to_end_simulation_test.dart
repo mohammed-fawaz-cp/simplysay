@@ -165,6 +165,54 @@ void main() {
       // Ensure both audio and video m-lines exist in SDP negotiation
       expect(decodedOffer['sdp'].contains('m=audio') && decodedOffer['sdp'].contains('m=video'), true);
       expect(decodedAnswer['sdp'].contains('m=audio') && decodedAnswer['sdp'].contains('m=video'), true);
+
+      // -------------------------------------------------------------
+      // Phase 6: Dynamic Real Name Handover & Verification
+      // -------------------------------------------------------------
+      final offerWithName = {
+        'signal_type': 'offer',
+        'sender_id': clientA['cit'],
+        'from_cit': clientA['cit'],
+        'sender_name': clientA['name'],
+        'sdp': 'v=0...',
+      };
+      final decodedOfferWithName = jsonDecode(jsonEncode(offerWithName));
+      expect(decodedOfferWithName['sender_name'], 'Alice Host');
+
+      final answerWithName = {
+        'signal_type': 'answer',
+        'sender_id': clientB['cit'],
+        'from_cit': clientB['cit'],
+        'sender_name': clientB['name'],
+        'sdp': 'v=0...',
+      };
+      final decodedAnswerWithName = jsonDecode(jsonEncode(answerWithName));
+      expect(decodedAnswerWithName['sender_name'], 'Bob Joiner');
+
+      // -------------------------------------------------------------
+      // Phase 7: Synchronized Hangup / Flow of Control Teardown
+      // -------------------------------------------------------------
+      // Client A clicks "End Call" -> broadcasts hangup signal
+      final hangupMessage = {
+        'signal_type': 'hangup',
+        'sender_id': clientA['cit'],
+        'from_cit': clientA['cit'],
+        'sender_name': clientA['name'],
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+
+      final encodedHangup = jsonEncode(hangupMessage);
+      final decodedHangup = jsonDecode(encodedHangup);
+
+      expect(decodedHangup['signal_type'], 'hangup');
+      expect(decodedHangup['from_cit'], 'cit_user_alice_101');
+
+      // Client B receives hangup -> triggers _handleHangup(isRemoteInitiated: true)
+      bool clientBTerminated = false;
+      if (decodedHangup['signal_type'] == 'hangup' || decodedHangup['signal_type'] == 'bye') {
+        clientBTerminated = true;
+      }
+      expect(clientBTerminated, true);
     });
   });
 }

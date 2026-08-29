@@ -47,10 +47,13 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   bool _isRendererInitialized = false;
   String? _myCit;
   String? _peerCit;
+  String _peerName = 'Peer User';
+  String? _myDisplayName;
   String? _callCode;
   bool _isCaller = true;
   String _connectionStatusText = 'Connecting...';
   bool _isConnected = false;
+  bool _isEndingCall = false;
 
   final List<RTCIceCandidate> _pendingIceCandidates = [];
   final List<Map<String, dynamic>> _localIceCandidatesBuffer = [];
@@ -119,6 +122,16 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
       _myCit = widget.myCit ?? args?['myCit'] as String? ?? identity?['cit'] as String?;
       _peerCit = widget.peerCit ?? args?['peerCit'] as String?;
+      final initialPeerName = widget.peerName ?? args?['peerName'] as String?;
+      if (initialPeerName != null && initialPeerName.isNotEmpty) {
+        _peerName = initialPeerName;
+      }
+      _myDisplayName = (identity?['display_name'] as String?)?.trim();
+      if (_myDisplayName == null || _myDisplayName!.isEmpty) {
+        final phone = (identity?['phone_number'] as String?)?.trim() ?? '';
+        _myDisplayName = phone.isNotEmpty && phone != '+1000000000' ? 'User ($phone)' : 'User';
+      }
+
       _callCode = widget.callCode ?? args?['callCode'] as String?;
       _isCaller = widget.isCaller ?? args?['isCaller'] as bool? ?? true;
 
@@ -161,10 +174,13 @@ class _CallScreenState extends ConsumerState<CallScreen> {
               _enableSpeakerphone();
             } else if (state == RTCIceConnectionState.RTCIceConnectionStateChecking) {
               _connectionStatusText = 'Negotiating connection...';
-            } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
-              _connectionStatusText = 'Connection failed, reconnecting...';
-            } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
-              _connectionStatusText = 'Disconnected';
+            } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
+                state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+                state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
+              if (_isConnected && !_isEndingCall) {
+                developer.log('🛑 [CallScreen] ICE state $state indicates disconnection. Triggering hangup.', name: 'CallScreen');
+                _handleHangup(isRemoteInitiated: true);
+              }
             }
           });
         }
@@ -178,6 +194,13 @@ class _CallScreenState extends ConsumerState<CallScreen> {
               _isConnected = true;
               _connectionStatusText = 'Connected (Live Media)';
               _enableSpeakerphone();
+            } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateClosed ||
+                state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
+                state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+              if (_isConnected && !_isEndingCall) {
+                developer.log('🛑 [CallScreen] Peer connection state $state indicates disconnection. Triggering hangup.', name: 'CallScreen');
+                _handleHangup(isRemoteInitiated: true);
+              }
             }
           });
         }
@@ -239,6 +262,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
         MQTTService.instance.subscribe('simplysay/webrtc/live/offer/$_myCit');
         MQTTService.instance.subscribe('simplysay/webrtc/live/answer/$_myCit');
         MQTTService.instance.subscribe('simplysay/webrtc/live/ice/$_myCit');
+        MQTTService.instance.subscribe('simplysay/webrtc/live/hangup/$_myCit');
+        MQTTService.instance.subscribe('simplysay/webrtc/live/bye/$_myCit');
       }
 
       _mqttSubscription = MQTTService.instance.messageStream.listen(_handleMqttSignalingMessage);
@@ -249,7 +274,11 @@ class _CallScreenState extends ConsumerState<CallScreen> {
         developer.log('👂 [CallScreen] Callee broadcasting READY ping...', name: 'CallScreen');
         _broadcastSignalingMessage(
           signalType: 'ready',
-          payload: {'from_cit': _myCit, 'timestamp': DateTime.now().millisecondsSinceEpoch},
+          payload: {
+            'from_cit': _myCit,
+            'sender_name': _myDisplayName,
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
+          },
         );
       } else {
         // Caller generates and sends SDP Offer with periodic retry
@@ -290,6 +319,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
         signalType: 'offer',
         payload: {
           'from_cit': _myCit,
+          'sender_name': _myDisplayName,
           'sdp': offer.sdp,
           'type': offer.type,
           'ice_candidates': _localIceCandidatesBuffer,
@@ -320,6 +350,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
             signalType: 'offer',
             payload: {
               'from_cit': _myCit,
+              'sender_name': _myDisplayName,
               'sdp': localDesc.sdp,
               'type': localDesc.type,
               'ice_candidates': _localIceCandidatesBuffer,
@@ -377,6 +408,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
         _processIncomingSignal('ice', data);
       } else if (topic.startsWith('simplysay/webrtc/live/ready/')) {
         _processIncomingSignal('ready', data);
+      } else if (topic.startsWith('simplysay/webrtc/live/hangup/') || topic.startsWith('simplysay/webrtc/live/bye/')) {
+        _processIncomingSignal('hangup', data);
       }
     } catch (e) {
       developer.log('⚠️ [CallScreen] Error handling MQTT signaling message: $e', name: 'CallScreen');
@@ -391,8 +424,31 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       _peerCit = fromCit;
     }
 
+    // Extract remote sender name if provided
+    final remoteSenderName = (data['sender_name'] as String?)?.trim();
+    if (remoteSenderName != null &&
+        remoteSenderName.isNotEmpty &&
+        remoteSenderName != 'Host User' &&
+        remoteSenderName != 'Peer User' &&
+        remoteSenderName != 'Joiner User') {
+      if (mounted && _peerName != remoteSenderName) {
+        setState(() {
+          _peerName = remoteSenderName;
+        });
+      }
+      if (_peerCit != null && _peerCit!.isNotEmpty) {
+        DatabaseHelper.instance.savePeer(peerId: _peerCit!, name: remoteSenderName);
+      }
+    }
+
     try {
       switch (signalType) {
+        case 'hangup':
+        case 'bye':
+          developer.log('🛑 [CallScreen] Received hangup/bye signal from $fromCit', name: 'CallScreen');
+          await _handleHangup(isRemoteInitiated: true);
+          break;
+
         case 'ready':
           developer.log('⚡ [CallScreen] Received READY handshake from peer $fromCit', name: 'CallScreen');
           if (_isCaller && !_isRemoteDescriptionSet) {
@@ -435,6 +491,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
               signalType: 'answer',
               payload: {
                 'from_cit': _myCit,
+                'sender_name': _myDisplayName,
                 'sdp': answer.sdp,
                 'type': answer.type,
                 'ice_candidates': _localIceCandidatesBuffer,
@@ -473,6 +530,58 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       }
     } catch (e) {
       developer.log('⚠️ [CallScreen] Error processing signal $signalType: $e', name: 'CallScreen');
+    }
+  }
+
+  /// Handles clean call termination and synchronization
+  Future<void> _handleHangup({bool isRemoteInitiated = false}) async {
+    if (_isEndingCall) return;
+    _isEndingCall = true;
+
+    developer.log('🛑 [CallScreen] Ending call (isRemoteInitiated=$isRemoteInitiated)...', name: 'CallScreen');
+
+    if (!isRemoteInitiated) {
+      _broadcastSignalingMessage(
+        signalType: 'hangup',
+        payload: {
+          'from_cit': _myCit,
+          'sender_name': _myDisplayName,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        },
+      );
+    }
+
+    _offerRetryTimer?.cancel();
+    _mqttSubscription?.cancel();
+
+    // Save recent call to database
+    if (_peerCit != null && _peerCit!.isNotEmpty) {
+      try {
+        await DatabaseHelper.instance.savePeer(peerId: _peerCit!, name: _peerName);
+      } catch (_) {}
+    }
+
+    try {
+      _peerConnection?.close();
+    } catch (_) {}
+
+    try {
+      _localStream?.getTracks().forEach((track) => track.stop());
+      _remoteStream?.getTracks().forEach((track) => track.stop());
+    } catch (_) {}
+
+    if (mounted) {
+      if (isRemoteInitiated) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Call ended by peer'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
     }
   }
 
@@ -524,77 +633,82 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-    final String resolvedPeerName = widget.peerName ?? args?['peerName'] as String? ?? 'Peer User';
     final callState = ref.watch(callScreenProvider);
     final notifier = ref.read(callScreenProvider.notifier);
     final screenSize = MediaQuery.of(context).size;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          // -------------------------------------------------------------------
-          // 1. Main Video Background (Remote Peer WebRTC Stream or Avatar Fallback)
-          // -------------------------------------------------------------------
-          Positioned.fill(
-            child: (_isRendererInitialized && _remoteRenderer.srcObject != null)
-                ? RTCVideoView(
-                    _remoteRenderer,
-                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                  )
-                : Container(
-                    color: const Color(0xFF111318),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircleAvatar(
-                            radius: 56,
-                            backgroundColor: Theme.of(context).colorScheme.primary,
-                            child: Text(
-                              resolvedPeerName.isNotEmpty ? resolvedPeerName[0].toUpperCase() : 'P',
-                              style: const TextStyle(fontSize: 44, fontWeight: FontWeight.bold, color: Colors.white),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          _handleHangup(isRemoteInitiated: false);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            // -------------------------------------------------------------------
+            // 1. Main Video Background (Remote Peer WebRTC Stream or Avatar Fallback)
+            // -------------------------------------------------------------------
+            Positioned.fill(
+              child: (_isRendererInitialized && _remoteRenderer.srcObject != null)
+                  ? RTCVideoView(
+                      _remoteRenderer,
+                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    )
+                  : Container(
+                      color: const Color(0xFF111318),
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            CircleAvatar(
+                              radius: 56,
+                              backgroundColor: Theme.of(context).colorScheme.primary,
+                              child: Text(
+                                _peerName.isNotEmpty ? _peerName[0].toUpperCase() : 'P',
+                                style: const TextStyle(fontSize: 44, fontWeight: FontWeight.bold, color: Colors.white),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            resolvedPeerName,
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
+                            const SizedBox(height: 16),
+                            Text(
+                              _peerName,
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (!_isConnected) ...[
-                                const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (!_isConnected) ...[
+                                  const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                ],
+                                Text(
+                                  _connectionStatusText,
+                                  style: const TextStyle(
+                                    fontSize: 13,
                                     color: Colors.white70,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
                               ],
-                              Text(
-                                _connectionStatusText,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.white70,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-          ),
+            ),
 
           // Top/Bottom Scrim Gradient Overlay
           Positioned.fill(
@@ -627,7 +741,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                 child: Column(
                   children: [
                     Text(
-                      resolvedPeerName,
+                      _peerName,
                       style: const TextStyle(
                         fontFamily: 'Inter',
                         fontSize: 22,
@@ -794,9 +908,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                             iconSize: 28,
                             tooltip: 'End Call',
                             onPressed: () {
-                              if (Navigator.of(context).canPop()) {
-                                Navigator.of(context).pop();
-                              }
+                              _handleHangup(isRemoteInitiated: false);
                             },
                           ),
                           const SizedBox(width: 14),
@@ -851,8 +963,9 @@ class _CallScreenState extends ConsumerState<CallScreen> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class _CallControlButton extends StatelessWidget {

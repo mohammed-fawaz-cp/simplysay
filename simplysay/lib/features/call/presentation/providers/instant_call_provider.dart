@@ -133,8 +133,16 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
 
   Future<void> _registerOnBackendAndMqtt() async {
     final identity = await DatabaseHelper.instance.getClientIdentity();
-    final myDisplayName = (identity?['display_name'] as String?)?.trim();
-    final hostName = (myDisplayName != null && myDisplayName.isNotEmpty) ? myDisplayName : 'Host User';
+    String hostName = (identity?['display_name'] as String?)?.trim() ?? '';
+    if (hostName.isEmpty) {
+      final phone = (identity?['phone_number'] as String?)?.trim() ?? '';
+      if (phone.isNotEmpty && phone != '+1000000000') {
+        hostName = 'User ($phone)';
+      } else {
+        final deviceId = identity?['device_id'] as String? ?? '';
+        hostName = deviceId.isNotEmpty ? 'User ${deviceId.substring(0, min(5, deviceId.length))}' : 'Host';
+      }
+    }
     String hostId = identity?['cit'] as String? ?? '';
 
     if (hostId.isEmpty) {
@@ -304,8 +312,16 @@ class JoinCallNotifier extends StateNotifier<JoinCallState> {
     state = state.copyWith(isConnecting: true, errorMessage: null);
 
     final identity = await DatabaseHelper.instance.getClientIdentity();
-    final myDisplayName = (identity?['display_name'] as String?)?.trim();
-    final joinerName = (myDisplayName != null && myDisplayName.isNotEmpty) ? myDisplayName : 'Joiner User';
+    String joinerName = (identity?['display_name'] as String?)?.trim() ?? '';
+    if (joinerName.isEmpty) {
+      final phone = (identity?['phone_number'] as String?)?.trim() ?? '';
+      if (phone.isNotEmpty && phone != '+1000000000') {
+        joinerName = 'User ($phone)';
+      } else {
+        final deviceId = identity?['device_id'] as String? ?? '';
+        joinerName = deviceId.isNotEmpty ? 'User ${deviceId.substring(0, min(5, deviceId.length))}' : 'Joiner';
+      }
+    }
     String joinerId = identity?['cit'] as String? ?? '';
 
     if (joinerId.isEmpty) {
