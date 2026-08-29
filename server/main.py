@@ -159,16 +159,57 @@ def admin_clear_data(admin_user: str = Depends(get_current_admin)):
         "cleared_count": count
     }
 
-@app.post("/admin/send-notification", summary="Send Push Notification via FCM Admin")
-def send_fcm_notification(
-    payload: NotificationRequest,
-    admin_user: str = Depends(get_current_admin)
-):
-    result = fcm_service.send_notification(
-        target_token=payload.token,
-        title=payload.title,
-        body=payload.body,
-        data=payload.data
+# In-Memory FCM Device Token Registry (Ephemeral routing, Zero Server Storage)
+fcm_token_registry: Dict[str, str] = {}
+
+class RegisterFCMTokenRequest(BaseModel):
+    cit: str
+    fcm_token: str
+
+class SendDataCallPushRequest(BaseModel):
+    target_token: Optional[str] = None
+    target_cit: Optional[str] = None
+    caller_cit: str
+    caller_name: str
+    call_code: str
+    sdp_offer: Optional[str] = None
+    call_type: str = "video"
+
+@app.post("/api/v1/fcm/register-token", summary="Register Ephemeral Device FCM Token")
+def register_fcm_token(payload: RegisterFCMTokenRequest):
+    fcm_token_registry[payload.cit] = payload.fcm_token
+    return {
+        "status": "success",
+        "cit": payload.cit,
+        "message": "FCM token registered successfully."
+    }
+
+@app.get("/api/v1/fcm/token/{cit}", summary="Get FCM Token by CIT")
+def get_fcm_token(cit: str):
+    token = fcm_token_registry.get(cit)
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found for CIT")
+    return {"cit": cit, "fcm_token": token}
+
+@app.post("/api/v1/fcm/send-call-push", summary="Send High-Priority Data-Only Call Push")
+def send_data_call_push(payload: SendDataCallPushRequest):
+    token = payload.target_token or fcm_token_registry.get(payload.target_cit or "")
+    if not token:
+        raise HTTPException(status_code=404, detail="Recipient FCM token not available.")
+
+    data_payload = {
+        "type": "incoming_call",
+        "caller_cit": payload.caller_cit,
+        "caller_name": payload.caller_name,
+        "call_code": payload.call_code,
+        "call_type": payload.call_type,
+        "sdp_offer": payload.sdp_offer or "",
+        "timestamp": str(int(time.time() * 1000)),
+    }
+
+    result = fcm_service.send_data_call_push(
+        target_token=token,
+        data=data_payload
     )
     return result
 

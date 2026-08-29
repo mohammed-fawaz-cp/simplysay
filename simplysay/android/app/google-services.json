@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "710245544187",
+    "project_id": "simplysay-15a0e",
+    "storage_bucket": "simplysay-15a0e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:710245544187:android:4d7dc6fcbd1f37d2be805e",
+        "android_client_info": {
+          "package_name": "com.comlabs.simplysay"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCSWuOff7zP_iTbSmC_0KyyRgF5SYRmJ_8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

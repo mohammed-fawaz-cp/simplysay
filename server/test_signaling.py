@@ -78,5 +78,16 @@ class TestInstantCallZeroServerStorage(unittest.TestCase):
         self.assertEqual(res.json()["cleared_count"], 1)
         self.assertEqual(len(instant_call_store), 0)
 
+    def test_fcm_token_registration_and_push(self):
+        # Register token for user
+        res = client.post("/api/v1/fcm/register-token", json={"cit": "user_cit_999", "fcm_token": "mock_fcm_token_abc"})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "success")
+
+        # Get token
+        res = client.get("/api/v1/fcm/token/user_cit_999")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["fcm_token"], "mock_fcm_token_abc")
+
 if __name__ == "__main__":
     unittest.main()

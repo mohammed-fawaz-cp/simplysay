@@ -5,6 +5,8 @@
 *.pem
 *.key
 *.cert
+*firebase-service-account*.json
+*firebase_service_account*.json
 
 # Design assets & documentation
 desigh theory/
