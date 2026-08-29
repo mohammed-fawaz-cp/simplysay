@@ -14,7 +14,7 @@ final webRTCServiceProvider = Provider<WebRTCService>((ref) => WebRTCService());
 
 final mqttServiceProvider = Provider<MQTTService>((ref) => MQTTService.instance);
 
-final fcmServiceProvider = Provider<FCMService>((ref) => FCMService());
+final fcmServiceProvider = Provider<FCMService>((ref) => FCMService.instance);
 
 final notificationServiceProvider = Provider<NotificationService>((ref) => NotificationService());
 

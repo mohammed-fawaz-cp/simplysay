@@ -517,6 +517,35 @@ class DatabaseHelper {
     return await db.query('peers', orderBy: 'last_seen DESC');
   }
 
+  /// Saves a local key-value setting
+  Future<void> setSetting(String key, String value) async {
+    if (kIsWeb) return;
+    final db = await database;
+    if (db == null) return;
+    await db.insert(
+      'local_settings',
+      {'key': key, 'value': value},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Retrieves a local key-value setting
+  Future<String?> getSetting(String key) async {
+    if (kIsWeb) return null;
+    final db = await database;
+    if (db == null) return null;
+    final res = await db.query(
+      'local_settings',
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    if (res.isNotEmpty) {
+      return res.first['value'] as String?;
+    }
+    return null;
+  }
+
   Future<void> close() async {
     if (!kIsWeb) {
       final db = await database;
