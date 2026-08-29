@@ -95,14 +95,28 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
   Future<void> _startLocalCamera() async {
     try {
-      final mediaConstraints = <String, dynamic>{
-        'audio': true,
-        'video': {
-          'facingMode': 'user',
-          'width': {'ideal': 1280},
-          'height': {'ideal': 720},
-        },
-      };
+      Map<String, dynamic> mediaConstraints;
+      final isDesktop = !kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.windows ||
+              defaultTargetPlatform == TargetPlatform.macOS ||
+              defaultTargetPlatform == TargetPlatform.linux);
+
+      if (isDesktop) {
+        mediaConstraints = <String, dynamic>{
+          'audio': true,
+          'video': true,
+        };
+      } else {
+        mediaConstraints = <String, dynamic>{
+          'audio': true,
+          'video': {
+            'facingMode': 'user',
+            'width': {'ideal': 1280},
+            'height': {'ideal': 720},
+          },
+        };
+      }
+
       _localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
       if (mounted) {
         setState(() {
@@ -110,7 +124,17 @@ class _CallScreenState extends ConsumerState<CallScreen> {
         });
       }
     } catch (e) {
-      developer.log('⚠️ Error capturing local camera stream: $e', name: 'CallScreen');
+      developer.log('⚠️ Error capturing local camera with ideal constraints: $e, falling back to basic video/audio...', name: 'CallScreen');
+      try {
+        _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': true});
+        if (mounted) {
+          setState(() {
+            _localRenderer.srcObject = _localStream;
+          });
+        }
+      } catch (e2) {
+        developer.log('⚠️ Critical error capturing media: $e2', name: 'CallScreen');
+      }
     }
   }
 
@@ -174,13 +198,9 @@ class _CallScreenState extends ConsumerState<CallScreen> {
               _enableSpeakerphone();
             } else if (state == RTCIceConnectionState.RTCIceConnectionStateChecking) {
               _connectionStatusText = 'Negotiating connection...';
-            } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
-                state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
-                state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
-              if (_isConnected && !_isEndingCall) {
-                developer.log('🛑 [CallScreen] ICE state $state indicates disconnection. Triggering hangup.', name: 'CallScreen');
-                _handleHangup(isRemoteInitiated: true);
-              }
+            } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+                state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+              _connectionStatusText = 'Reconnecting...';
             }
           });
         }
@@ -194,13 +214,6 @@ class _CallScreenState extends ConsumerState<CallScreen> {
               _isConnected = true;
               _connectionStatusText = 'Connected (Live Media)';
               _enableSpeakerphone();
-            } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateClosed ||
-                state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
-                state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
-              if (_isConnected && !_isEndingCall) {
-                developer.log('🛑 [CallScreen] Peer connection state $state indicates disconnection. Triggering hangup.', name: 'CallScreen');
-                _handleHangup(isRemoteInitiated: true);
-              }
             }
           });
         }
@@ -216,22 +229,24 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       // 2. Bind remote streams & tracks
       _peerConnection?.onTrack = (RTCTrackEvent event) {
         developer.log('📹 [CallScreen] Remote track received: ${event.track.kind}, streams: ${event.streams.length}', name: 'CallScreen');
-        if (event.streams.isNotEmpty && mounted) {
-          setState(() {
-            _remoteStream = event.streams[0];
-            _remoteRenderer.srcObject = _remoteStream;
-            _isConnected = true;
-            _connectionStatusText = 'Connected (Live Media)';
-          });
+        if (event.streams.isNotEmpty) {
+          _remoteStream = event.streams[0];
+          _remoteRenderer.srcObject = _remoteStream;
+          if (mounted) {
+            setState(() {
+              _isConnected = true;
+              _connectionStatusText = 'Connected (Live Media)';
+            });
+          }
         }
       };
 
       _peerConnection?.onAddStream = (MediaStream stream) {
         developer.log('📹 [CallScreen] Remote stream added: ${stream.id}', name: 'CallScreen');
+        _remoteStream = stream;
+        _remoteRenderer.srcObject = _remoteStream;
         if (mounted) {
           setState(() {
-            _remoteStream = stream;
-            _remoteRenderer.srcObject = stream;
             _isConnected = true;
             _connectionStatusText = 'Connected (Live Media)';
           });
@@ -640,7 +655,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop) {
+        if (didPop && !_isEndingCall) {
           _handleHangup(isRemoteInitiated: false);
         }
       },

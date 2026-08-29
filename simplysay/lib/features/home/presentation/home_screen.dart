@@ -156,13 +156,11 @@ class _HomeRecentViewState extends ConsumerState<HomeRecentView> {
                       return RecentCallTile(
                         record: record,
                         onTap: () {
-                          Navigator.of(context).pushNamed(
-                            AppRoutes.call,
-                            arguments: {
-                              'peerName': record.name,
-                              'peerCit': record.id,
-                              'isCaller': true,
-                            },
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Direct calling from history is paused. Please use Instant Call to connect.'),
+                              duration: Duration(seconds: 2),
+                            ),
                           );
                         },
                       );

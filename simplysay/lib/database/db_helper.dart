@@ -398,41 +398,115 @@ class DatabaseHelper {
   }
 
   /// Saves a connected peer (from Instant Call or WebRTC connection) to local storage & contacts
+  /// Reuses existing peer record if already present, updating last_seen and custom name.
   Future<void> savePeer({
     required String peerId,
     required String name,
   }) async {
-    developer.log('⚡ [DatabaseHelper.savePeer] Saving connected peer (id=$peerId, name=$name)...', name: 'DatabaseHelper');
+    developer.log('⚡ [DatabaseHelper.savePeer] Saving/updating connected peer (id=$peerId, name=$name)...', name: 'DatabaseHelper');
     final now = DateTime.now().millisecondsSinceEpoch;
-    final peerData = {
-      'id': peerId,
-      'name': name,
-      'peer_id': peerId,
-      'last_seen': now,
-      'created_at': now,
-    };
-    final contactData = {
-      'name': name,
-      'phone_number': '',
-      'cit': peerId,
-      'csit': 'csit_$peerId',
-      'display_name': name,
-      'is_simplysay_user': 1,
-      'synced_at': now,
-    };
 
     if (kIsWeb) {
-      _webContacts.removeWhere((c) => c['cit'] == peerId || c['name'] == name);
-      _webContacts.add(contactData);
-      developer.log('✅ [DatabaseHelper.savePeer] Saved peer & contact in Web memory.', name: 'DatabaseHelper');
+      final existingIndex = _webContacts.indexWhere((c) => c['cit'] == peerId || c['name'] == name);
+      final cleanName = (name.isNotEmpty && name != 'Host User' && name != 'Joiner User')
+          ? name
+          : (existingIndex != -1 ? (_webContacts[existingIndex]['name'] ?? name) : name);
+
+      final contactData = {
+        'name': cleanName,
+        'phone_number': '',
+        'cit': peerId,
+        'csit': 'csit_$peerId',
+        'display_name': cleanName,
+        'is_simplysay_user': 1,
+        'synced_at': now,
+      };
+
+      if (existingIndex != -1) {
+        _webContacts[existingIndex] = contactData;
+      } else {
+        _webContacts.add(contactData);
+      }
       return;
     }
 
     final db = await database;
     if (db == null) return;
-    await db.insert('peers', peerData, conflictAlgorithm: ConflictAlgorithm.replace);
-    await db.insert('contacts', contactData, conflictAlgorithm: ConflictAlgorithm.replace);
-    developer.log('✅ [DatabaseHelper.savePeer] Saved peer & contact locally in SQLite.', name: 'DatabaseHelper');
+
+    // Check if peer already exists in SQLite
+    final existingPeers = await db.query(
+      'peers',
+      where: 'id = ? OR peer_id = ?',
+      whereArgs: [peerId, peerId],
+      limit: 1,
+    );
+
+    String resolvedName = name;
+    if (existingPeers.isNotEmpty) {
+      final oldName = existingPeers.first['name'] as String? ?? '';
+      if ((resolvedName.isEmpty || resolvedName == 'Host User' || resolvedName == 'Joiner User') && oldName.isNotEmpty) {
+        resolvedName = oldName;
+      }
+      // Update existing peer record
+      await db.update(
+        'peers',
+        {
+          'name': resolvedName,
+          'last_seen': now,
+        },
+        where: 'id = ? OR peer_id = ?',
+        whereArgs: [peerId, peerId],
+      );
+    } else {
+      // Insert new peer record
+      await db.insert(
+        'peers',
+        {
+          'id': peerId,
+          'name': resolvedName,
+          'peer_id': peerId,
+          'last_seen': now,
+          'created_at': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+
+    // Update contacts table without creating duplicate records
+    final existingContacts = await db.query(
+      'contacts',
+      where: 'cit = ?',
+      whereArgs: [peerId],
+      limit: 1,
+    );
+
+    if (existingContacts.isNotEmpty) {
+      await db.update(
+        'contacts',
+        {
+          'name': resolvedName,
+          'display_name': resolvedName,
+          'synced_at': now,
+        },
+        where: 'cit = ?',
+        whereArgs: [peerId],
+      );
+    } else {
+      await db.insert(
+        'contacts',
+        {
+          'name': resolvedName,
+          'phone_number': '',
+          'cit': peerId,
+          'csit': 'csit_$peerId',
+          'display_name': resolvedName,
+          'is_simplysay_user': 1,
+          'synced_at': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    developer.log('✅ [DatabaseHelper.savePeer] Saved peer & contact locally in SQLite (reused existing=${existingPeers.isNotEmpty}).', name: 'DatabaseHelper');
   }
 
   /// Retrieves all connected peers for Recent Calls display
