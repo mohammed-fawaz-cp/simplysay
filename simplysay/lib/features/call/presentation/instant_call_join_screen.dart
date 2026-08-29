@@ -116,6 +116,8 @@ class InstantCallJoinScreen extends ConsumerWidget {
                       : () async {
                           final success = await joinNotifier.joinCall();
                           if (success && context.mounted) {
+                            final latestJoinState = ref.read(joinCallProvider);
+                            final cleanCode = latestJoinState.callCode ?? latestJoinState.code.replaceAll('-', '').trim().toUpperCase();
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text('Connection established! Directing to call...'),
@@ -125,7 +127,13 @@ class InstantCallJoinScreen extends ConsumerWidget {
                             // Navigate to WebRTC active call screen with peer info
                             Navigator.of(context).pushReplacementNamed(
                               AppRoutes.call,
-                              arguments: {'peerName': joinState.hostName},
+                              arguments: {
+                                'peerName': latestJoinState.hostName,
+                                'peerCit': latestJoinState.hostId,
+                                'myCit': latestJoinState.myCit,
+                                'callCode': cleanCode,
+                                'isCaller': false,
+                              },
                             );
                           }
                         },

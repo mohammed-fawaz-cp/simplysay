@@ -23,6 +23,7 @@ class InstantCallHostScreen extends ConsumerWidget {
     // Auto-navigate Host when Peer connects over MQTT/FastAPI backend
     ref.listen<HostCallState>(hostCallProvider, (previous, next) {
       if (next.isConnected && context.mounted) {
+        final cleanCode = next.code.replaceAll('-', '').trim().toUpperCase();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Peer ${next.connectedPeerName} connected! Directing to call...'),
@@ -31,7 +32,13 @@ class InstantCallHostScreen extends ConsumerWidget {
         );
         Navigator.of(context).pushReplacementNamed(
           AppRoutes.call,
-          arguments: {'peerName': next.connectedPeerName},
+          arguments: {
+            'peerName': next.connectedPeerName,
+            'peerCit': next.connectedPeerId,
+            'myCit': next.myCit,
+            'callCode': cleanCode,
+            'isCaller': true,
+          },
         );
       }
     });

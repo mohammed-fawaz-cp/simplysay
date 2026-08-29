@@ -156,7 +156,14 @@ class _HomeRecentViewState extends ConsumerState<HomeRecentView> {
                       return RecentCallTile(
                         record: record,
                         onTap: () {
-                          Navigator.of(context).pushNamed(AppRoutes.call);
+                          Navigator.of(context).pushNamed(
+                            AppRoutes.call,
+                            arguments: {
+                              'peerName': record.name,
+                              'peerCit': record.id,
+                              'isCaller': true,
+                            },
+                          );
                         },
                       );
                     },

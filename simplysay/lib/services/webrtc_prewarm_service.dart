@@ -44,8 +44,8 @@ class WebRTCPrewarmService {
       await mqtt.initialize(cit: _myCit!);
     }
 
-    mqtt.subscribe('simplysay/webrtc/offer/$_myCit');
-    mqtt.subscribe('simplysay/webrtc/answer/$_myCit');
+    mqtt.subscribe('simplysay/webrtc/prewarm/offer/$_myCit');
+    mqtt.subscribe('simplysay/webrtc/prewarm/answer/$_myCit');
 
     mqtt.messageStream.listen(_handleSingleMqttMessage);
     _isListening = true;
@@ -90,7 +90,7 @@ class WebRTCPrewarmService {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
 
-      final topic = 'simplysay/webrtc/offer/$peerCit';
+      final topic = 'simplysay/webrtc/prewarm/offer/$peerCit';
       MQTTService.instance.publishMessage(topic, payload);
       developer.log('📤 [WebRTCPrewarmService.prewarmSessionWithPeer] Pre-warmed offer published to $topic', name: 'WebRTCPrewarmService');
 
@@ -117,9 +117,9 @@ class WebRTCPrewarmService {
     try {
       final data = jsonDecode(payloadStr) as Map<String, dynamic>;
 
-      if (topic.startsWith('simplysay/webrtc/offer/')) {
+      if (topic.startsWith('simplysay/webrtc/prewarm/offer/')) {
         _processIncomingOffer(data);
-      } else if (topic.startsWith('simplysay/webrtc/answer/')) {
+      } else if (topic.startsWith('simplysay/webrtc/prewarm/answer/')) {
         _processIncomingAnswer(data);
       }
     } catch (e) {
@@ -174,7 +174,7 @@ class WebRTCPrewarmService {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
 
-      final topic = 'simplysay/webrtc/answer/$peerCit';
+      final topic = 'simplysay/webrtc/prewarm/answer/$peerCit';
       MQTTService.instance.publishMessage(topic, payload);
       developer.log('📤 [WebRTCPrewarmService._generateAndSendAnswer] Pre-warmed answer sent to $topic', name: 'WebRTCPrewarmService');
 

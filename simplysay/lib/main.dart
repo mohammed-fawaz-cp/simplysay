@@ -27,8 +27,9 @@ class SimplySayApp extends ConsumerWidget {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
-      initialRoute: AppRoutes.login,
-      routes: AppRoutes.routes,
+      home: homeScreen,
+      initialRoute: homeScreen == null ? AppRoutes.login : null,
+      routes: homeScreen == null ? AppRoutes.routes : {},
     );
   }
 }

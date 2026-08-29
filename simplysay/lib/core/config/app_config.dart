@@ -5,7 +5,7 @@ class AppConfig {
 
   // --- REST API Server Configuration ---
   /// Dynamic backend domain/URL. Can be modified in config for Vercel, Render, or custom domains.
-  static String apiBaseUrl = 'http://159.89.166.217:8000/api/v1';
+  static String apiBaseUrl = "https://simplysay.onrender.com/api/v1";
 
   // --- MQTT Configuration ---
   static String mqttBroker = '159.89.166.217';

@@ -1,0 +1,220 @@
+{
+	"info": {
+		"_postman_id": "simplysay-api-collection-v1",
+		"name": "SimplySay API",
+		"description": "Postman Collection for SimplySay FastApi backend server (Zero-Server-Storage)",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						""
+					]
+				},
+				"description": "Health check for the backend"
+			},
+			"response": []
+		},
+		{
+			"name": "Clear All Data (DB Clear)",
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/v1/instant-call/clear-all",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"instant-call",
+						"clear-all"
+					]
+				},
+				"description": "Clears all instant call sessions and ephemeral DB data from the server."
+			},
+			"response": []
+		},
+		{
+			"name": "Clear All Data (POST alternative)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/v1/instant-call/clear-all",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"instant-call",
+						"clear-all"
+					]
+				},
+				"description": "Clears all instant call sessions and ephemeral DB data from the server using POST method."
+			},
+			"response": []
+		},
+		{
+			"name": "Create Instant Call (Host)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"code\": \"123-456-789\",\n    \"host_id\": \"user_cit_alice\",\n    \"host_name\": \"Alice Host\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/v1/instant-call/create",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"instant-call",
+						"create"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Check Call Status",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/instant-call/status/123456789",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"instant-call",
+						"status",
+						"123456789"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Join Instant Call (Joiner)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"code\": \"123-456-789\",\n    \"joiner_id\": \"user_cit_bob\",\n    \"joiner_name\": \"Bob Joiner\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/v1/instant-call/join",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"instant-call",
+						"join"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Cancel / End Call",
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/instant-call/cancel/123456789",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"instant-call",
+						"cancel",
+						"123456789"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Admin Clear Data (Protected)",
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "username",
+							"value": "admin",
+							"type": "string"
+						},
+						{
+							"key": "password",
+							"value": "admin123",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/admin/clear-data",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"admin",
+						"clear-data"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://127.0.0.1:8000",
+			"type": "string"
+		}
+	]
+}

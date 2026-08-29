@@ -104,7 +104,7 @@ def join_instant_call(payload: JoinInstantCallRequest):
     call_data["joiner_id"] = payload.joiner_id
     call_data["joiner_name"] = payload.joiner_name
     call_data["joined_at"] = now
-    call_data["expires_at"] = now + 60 # Keep for 60 seconds for host poll retrieval
+    call_data["expires_at"] = now + 120 # Keep for 2 minutes for host retrieval
 
     return {
         "status": "success",
@@ -126,11 +126,38 @@ def get_instant_call_status(code: str):
         "joiner_name": call_data.get("joiner_name")
     }
 
+@app.delete("/api/v1/instant-call/clear-all", summary="Clear All Instant Call Sessions")
+@app.post("/api/v1/instant-call/clear-all", summary="Clear All Instant Call Sessions (POST variant)")
+def clear_all_instant_calls():
+    count = len(instant_call_store)
+    instant_call_store.clear()
+    return {
+        "status": "success",
+        "message": f"Cleared {count} instant call session(s). Database is now empty.",
+        "cleared_count": count
+    }
+
 @app.delete("/api/v1/instant-call/cancel/{code}", summary="Cancel Instant Call Code")
 def cancel_instant_call(code: str):
     clean_code = code.replace("-", "").replace(" ", "").upper()
+    existed = clean_code in instant_call_store
     instant_call_store.pop(clean_code, None)
-    return {"status": "success"}
+    return {
+        "status": "success",
+        "message": f"Session {clean_code} removed." if existed else "Session not found."
+    }
+
+@app.post("/admin/clear-data", summary="Admin Clear All Server Data")
+@app.delete("/admin/clear-data", summary="Admin Clear All Server Data (DELETE variant)")
+def admin_clear_data(admin_user: str = Depends(get_current_admin)):
+    count = len(instant_call_store)
+    instant_call_store.clear()
+    return {
+        "status": "success",
+        "admin": admin_user,
+        "message": f"All data cleared by {admin_user}.",
+        "cleared_count": count
+    }
 
 @app.post("/admin/send-notification", summary="Send Push Notification via FCM Admin")
 def send_fcm_notification(
@@ -147,4 +174,6 @@ def send_fcm_notification(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+

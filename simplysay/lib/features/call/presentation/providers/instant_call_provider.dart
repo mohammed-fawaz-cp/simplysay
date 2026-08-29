@@ -15,6 +15,8 @@ class HostCallState {
   final bool isConnected;
   final bool isExpired;
   final String connectedPeerName;
+  final String? connectedPeerId;
+  final String? myCit;
 
   const HostCallState({
     required this.code,
@@ -22,6 +24,8 @@ class HostCallState {
     this.isConnected = false,
     this.isExpired = false,
     this.connectedPeerName = 'Peer User',
+    this.connectedPeerId,
+    this.myCit,
   });
 
   HostCallState copyWith({
@@ -30,6 +34,8 @@ class HostCallState {
     bool? isConnected,
     bool? isExpired,
     String? connectedPeerName,
+    String? connectedPeerId,
+    String? myCit,
   }) {
     return HostCallState(
       code: code ?? this.code,
@@ -37,6 +43,8 @@ class HostCallState {
       isConnected: isConnected ?? this.isConnected,
       isExpired: isExpired ?? this.isExpired,
       connectedPeerName: connectedPeerName ?? this.connectedPeerName,
+      connectedPeerId: connectedPeerId ?? this.connectedPeerId,
+      myCit: myCit ?? this.myCit,
     );
   }
 }
@@ -112,6 +120,7 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
                 state = state.copyWith(
                   isConnected: true,
                   connectedPeerName: peerName,
+                  connectedPeerId: peerId,
                 );
               }
               break;
@@ -126,10 +135,26 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
     final identity = await DatabaseHelper.instance.getClientIdentity();
     final myDisplayName = (identity?['display_name'] as String?)?.trim();
     final hostName = (myDisplayName != null && myDisplayName.isNotEmpty) ? myDisplayName : 'Host User';
-    final hostId = (identity?['cit'] as String?) ?? 'host_user_${Random().nextInt(9999)}';
+    String hostId = identity?['cit'] as String? ?? '';
+
+    if (hostId.isEmpty) {
+      hostId = 'host_user_${Random().nextInt(999999)}';
+      await DatabaseHelper.instance.saveClientIdentity(
+        cit: hostId,
+        csit: 'csit_$hostId',
+        deviceId: 'device_$hostId',
+        phoneNumber: '+1000000000',
+        displayName: hostName,
+      );
+    }
 
     final cleanCode = state.code.replaceAll('-', '').trim().toUpperCase();
     _subscribedTopic = 'simplysay/instant_call/$cleanCode';
+    final roomSignalingTopic = 'simplysay/call_session/$cleanCode/signaling';
+
+    if (mounted) {
+      state = state.copyWith(myCit: hostId);
+    }
 
     // 1. One-shot registration on FastAPI backend (Creates initial session entry)
     final endpoints = [
@@ -160,9 +185,10 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
       }
     }
 
-    // 2. Subscribe to MQTT topic for zero-polling real-time push events
+    // 2. Subscribe to MQTT topics for zero-polling real-time push events & early WebRTC signaling
     MQTTService.instance.subscribe(_subscribedTopic!);
-    developer.log('⚡ [InstantCallHost] Subscribed to MQTT topic: $_subscribedTopic', name: 'HostCallNotifier');
+    MQTTService.instance.subscribe(roomSignalingTopic);
+    developer.log('⚡ [InstantCallHost] Subscribed to MQTT topics: $_subscribedTopic & $roomSignalingTopic', name: 'HostCallNotifier');
 
     _mqttSubscription?.cancel();
     _mqttSubscription = MQTTService.instance.messageStream.listen((msg) async {
@@ -186,6 +212,8 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
               state = state.copyWith(
                 isConnected: true,
                 connectedPeerName: peerName,
+                connectedPeerId: peerId,
+                myCit: hostId,
               );
             }
           }
@@ -214,7 +242,6 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
   }
 }
 
-
 final hostCallProvider =
     StateNotifierProvider.autoDispose<HostCallNotifier, HostCallState>((ref) {
   return HostCallNotifier();
@@ -225,12 +252,18 @@ class JoinCallState {
   final bool isConnecting;
   final String? errorMessage;
   final String hostName;
+  final String? hostId;
+  final String? myCit;
+  final String? callCode;
 
   const JoinCallState({
     this.code = '',
     this.isConnecting = false,
     this.errorMessage,
     this.hostName = 'Host User',
+    this.hostId,
+    this.myCit,
+    this.callCode,
   });
 
   JoinCallState copyWith({
@@ -238,12 +271,18 @@ class JoinCallState {
     bool? isConnecting,
     String? errorMessage,
     String? hostName,
+    String? hostId,
+    String? myCit,
+    String? callCode,
   }) {
     return JoinCallState(
       code: code ?? this.code,
       isConnecting: isConnecting ?? this.isConnecting,
       errorMessage: errorMessage,
       hostName: hostName ?? this.hostName,
+      hostId: hostId ?? this.hostId,
+      myCit: myCit ?? this.myCit,
+      callCode: callCode ?? this.callCode,
     );
   }
 }
@@ -267,7 +306,18 @@ class JoinCallNotifier extends StateNotifier<JoinCallState> {
     final identity = await DatabaseHelper.instance.getClientIdentity();
     final myDisplayName = (identity?['display_name'] as String?)?.trim();
     final joinerName = (myDisplayName != null && myDisplayName.isNotEmpty) ? myDisplayName : 'Joiner User';
-    final joinerId = (identity?['cit'] as String?) ?? 'joiner_user_${Random().nextInt(9999)}';
+    String joinerId = identity?['cit'] as String? ?? '';
+
+    if (joinerId.isEmpty) {
+      joinerId = 'joiner_user_${Random().nextInt(999999)}';
+      await DatabaseHelper.instance.saveClientIdentity(
+        cit: joinerId,
+        csit: 'csit_$joinerId',
+        deviceId: 'device_$joinerId',
+        phoneNumber: '+1000000000',
+        displayName: joinerName,
+      );
+    }
 
     // 1. Verify code with FastAPI backend
     final endpoints = [
@@ -314,6 +364,10 @@ class JoinCallNotifier extends StateNotifier<JoinCallState> {
     // Save Host to local DB & Contacts & Recent Calls
     await DatabaseHelper.instance.savePeer(peerId: hostId, name: hostName);
 
+    // Pre-subscribe to the room signaling topic
+    final roomSignalingTopic = 'simplysay/call_session/$cleanCode/signaling';
+    MQTTService.instance.subscribe(roomSignalingTopic);
+
     // Publish MQTT event as secondary signal
     final topic = 'simplysay/instant_call/$cleanCode';
     final payload = jsonEncode({
@@ -324,10 +378,15 @@ class JoinCallNotifier extends StateNotifier<JoinCallState> {
     });
 
     MQTTService.instance.publishMessage(topic, payload);
-    developer.log('⚡ [InstantCallJoin] Published JOINED message to MQTT topic $topic', name: 'JoinCallNotifier');
+    developer.log('⚡ [InstantCallJoin] Published JOINED message to MQTT topic $topic and subscribed to $roomSignalingTopic', name: 'JoinCallNotifier');
 
-
-    state = state.copyWith(isConnecting: false, hostName: hostName);
+    state = state.copyWith(
+      isConnecting: false,
+      hostName: hostName,
+      hostId: hostId,
+      myCit: joinerId,
+      callCode: cleanCode,
+    );
     return true;
   }
 }

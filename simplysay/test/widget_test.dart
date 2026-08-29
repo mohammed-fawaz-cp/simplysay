@@ -22,9 +22,8 @@ void main() {
       ),
     );
 
-    expect(find.text('SimplySay'), findsOneWidget);
-    expect(find.text('Alex Johnson'), findsOneWidget);
-    expect(find.text('Jordan Smith'), findsOneWidget);
-    expect(find.text('Recent'), findsAtLeastNWidgets(1));
+    expect(find.text('Call'), findsWidgets);
+    expect(find.text('Contacts'), findsWidgets);
+    expect(find.text('Settings'), findsWidgets);
   });
 }

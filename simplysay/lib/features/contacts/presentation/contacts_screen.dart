@@ -481,7 +481,15 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                                                   icon: Icon(Icons.videocam_outlined, size: 24, color: subtitleColor),
                                                   tooltip: 'Video Call $displayName',
                                                   onPressed: () {
-                                                    Navigator.of(context).pushNamed(AppRoutes.call);
+                                                    final cit = (contact['cit'] ?? contact['peer_id'] ?? contact['id']) as String?;
+                                                    Navigator.of(context).pushNamed(
+                                                      AppRoutes.call,
+                                                      arguments: {
+                                                        'peerName': displayName,
+                                                        'peerCit': cit,
+                                                        'isCaller': true,
+                                                      },
+                                                    );
                                                   },
                                                 ),
                                               ],

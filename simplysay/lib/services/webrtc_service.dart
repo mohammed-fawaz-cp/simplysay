@@ -6,28 +6,39 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 class WebRTCService {
   RTCPeerConnection? _peerConnection;
 
-  // Open-source STUN/TURN Server Configuration
+  // Open-source STUN/TURN Server Configuration with robust fallback
   static final Map<String, dynamic> rtcConfiguration = {
     'iceServers': [
-      {'urls': 'stun:stun.l.google.com:19302'},
-      {'urls': 'stun:stun1.l.google.com:19302'},
-      {'urls': 'stun:stun2.l.google.com:19302'},
-      {'urls': 'stun:stun3.l.google.com:19302'},
-      {'urls': 'stun:stun4.l.google.com:19302'},
-      {'urls': 'stun:stun.services.mozilla.com'},
-      // Open-source public TURN fallback configuration
       {
-        'urls': 'turn:openrelay.metered.ca:80',
-        'username': 'openrelayproject',
-        'credential': 'openrelayproject'
+        'urls': [
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+          'stun:stun2.l.google.com:19302',
+          'stun:stun3.l.google.com:19302',
+          'stun:stun4.l.google.com:19302',
+        ],
       },
       {
-        'urls': 'turn:openrelay.metered.ca:443',
+        'urls': [
+          'stun:global.stun.twilio.com:3478',
+          'stun:stun.services.mozilla.com',
+          'stun:stun.cloudflare.com:3478',
+        ],
+      },
+      {
+        'urls': [
+          'turn:openrelay.metered.ca:80?transport=udp',
+          'turn:openrelay.metered.ca:80?transport=tcp',
+          'turn:openrelay.metered.ca:443?transport=tcp',
+          'turns:openrelay.metered.ca:443?transport=tcp',
+        ],
         'username': 'openrelayproject',
-        'credential': 'openrelayproject'
-      }
+        'credential': 'openrelayproject',
+      },
     ],
     'sdpSemantics': 'unified-plan',
+    'bundlePolicy': 'max-bundle',
+    'rtcpMuxPolicy': 'require',
   };
 
   Function(RTCIceCandidate candidate)? onIceCandidateDiscovered;
