@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../core/config/app_config.dart';
+import '../core/native/native_call_bridge.dart';
 import '../database/db_helper.dart';
 import '../firebase_options.dart';
 
@@ -28,7 +29,18 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final callerName = data['caller_name'] ?? 'Someone';
     final callCode = data['call_code'] ?? '';
     final callerCit = data['caller_cit'] ?? '';
-    developer.log('📞 [FCM Background] Waking up for incoming call from $callerName (code=$callCode, cit=$callerCit)', name: 'FCMService');
+    final sdpOffer = data['sdp_offer'];
+    final callType = data['call_type'] ?? 'video';
+    developer.log('📞 [FCM Background] Triggering Native Call Overlay for $callerName (code=$callCode, cit=$callerCit)', name: 'FCMService');
+
+    await NativeCallBridge.instance.showIncomingCall(
+      callerName: callerName,
+      callerCit: callerCit,
+      callCode: callCode,
+      sdpOffer: sdpOffer,
+      callType: callType,
+    );
+
     try {
       if (callerCit.isNotEmpty) {
         await DatabaseHelper.instance.savePeer(peerId: callerCit, name: callerName);
@@ -52,6 +64,8 @@ class FCMService {
   Future<void> initialize() async {
     if (_isInitialized) return;
     try {
+      NativeCallBridge.instance.initialize();
+
       if (Firebase.apps.isEmpty) {
         await Firebase.initializeApp(
           options: DefaultFirebaseOptions.currentPlatform,
@@ -76,7 +90,15 @@ class FCMService {
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         developer.log('📩 [FCM Foreground] Received data message: ${message.data}', name: 'FCMService');
         if (message.data['type'] == 'incoming_call') {
-          _incomingCallStreamController.add(Map<String, dynamic>.from(message.data));
+          final data = message.data;
+          _incomingCallStreamController.add(Map<String, dynamic>.from(data));
+          NativeCallBridge.instance.showIncomingCall(
+            callerName: data['caller_name'] ?? 'Someone',
+            callerCit: data['caller_cit'] ?? '',
+            callCode: data['call_code'] ?? '',
+            sdpOffer: data['sdp_offer'],
+            callType: data['call_type'] ?? 'video',
+          );
         }
       });
 
