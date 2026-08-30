@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/routes/app_routes.dart';
+import '../../../database/db_helper.dart';
+import '../../../services/fcm_service.dart';
 import '../../contacts/presentation/contacts_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
+import '../domain/models/call_record.dart';
 import 'providers/recent_calls_provider.dart';
 import 'widgets/recent_call_tile.dart';
 import 'widgets/home_navigation.dart';
@@ -155,14 +158,7 @@ class _HomeRecentViewState extends ConsumerState<HomeRecentView> {
                       final record = calls[index];
                       return RecentCallTile(
                         record: record,
-                        onTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Direct calling from history is paused. Please use Instant Call to connect.'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        },
+                        onTap: () => _initiateDirectCall(context, record),
                       );
                     },
                   ),
@@ -179,6 +175,38 @@ class _HomeRecentViewState extends ConsumerState<HomeRecentView> {
         child: const Icon(Icons.add_ic_call, size: 26),
       ),
     );
+  }
+
+  Future<void> _initiateDirectCall(BuildContext context, CallRecord record) async {
+    final identity = await DatabaseHelper.instance.getClientIdentity();
+    final myCit = identity?['cit'] as String? ?? 'user_${DateTime.now().millisecondsSinceEpoch % 100000}';
+    final myName = identity?['display_name'] as String? ?? 'Caller';
+
+    // Generate 9-character session code
+    final rand = DateTime.now().millisecondsSinceEpoch;
+    final cleanCode = 'SS${(rand % 1000000).toString().padLeft(6, '0')}';
+
+    // Dispatch Data-Only FCM push to wake up recipient
+    FCMService.instance.sendDataCallPush(
+      targetToken: '',
+      callerCit: myCit,
+      callerName: myName,
+      callCode: cleanCode,
+      callType: 'video',
+    );
+
+    if (context.mounted) {
+      Navigator.of(context).pushNamed(
+        AppRoutes.call,
+        arguments: {
+          'peerName': record.name,
+          'peerCit': record.id,
+          'myCit': myCit,
+          'callCode': cleanCode,
+          'isCaller': true,
+        },
+      );
+    }
   }
 }
 
