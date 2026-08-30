@@ -173,14 +173,15 @@ class FCMService {
 
   /// Dispatches a high-priority Data-Only FCM push to the recipient
   Future<bool> sendDataCallPush({
-    required String targetToken,
+    String? targetToken,
+    String? targetCit,
     required String callerCit,
     required String callerName,
     required String callCode,
     String? sdpOffer,
     String callType = 'video',
   }) async {
-    developer.log('🚀 [FCMService] Dispatching data-only call push to token=$targetToken (code=$callCode, caller=$callerName)...', name: 'FCMService');
+    developer.log('🚀 [FCMService] Dispatching data-only call push to targetToken=$targetToken, targetCit=$targetCit (code=$callCode, caller=$callerName)...', name: 'FCMService');
 
     final endpoints = [
       'http://127.0.0.1:8000/api/v1/fcm/send-call-push',
@@ -194,7 +195,8 @@ class FCMService {
           Uri.parse(url),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
-            'target_token': targetToken,
+            'target_token': targetToken ?? '',
+            'target_cit': targetCit ?? '',
             'caller_cit': callerCit,
             'caller_name': callerName,
             'call_code': callCode,

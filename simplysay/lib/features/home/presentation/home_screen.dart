@@ -188,7 +188,7 @@ class _HomeRecentViewState extends ConsumerState<HomeRecentView> {
 
     // Dispatch Data-Only FCM push to wake up recipient
     FCMService.instance.sendDataCallPush(
-      targetToken: '',
+      targetCit: record.id,
       callerCit: myCit,
       callerName: myName,
       callCode: cleanCode,

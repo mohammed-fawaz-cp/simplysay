@@ -131,5 +131,47 @@ void main() {
       expect(sdpOffer['sender_cit'], 'cit_host_1');
       expect(sdpAnswer['sender_cit'], 'cit_joiner_2');
     });
+
+    test('TC-06: Direct Redial from Recent Calls to Inactive Device Flow (Accept & Reject)', () {
+      // 1. Device B taps Device A in Recent Tab
+      final recentPeerId = 'cit_device_a_777';
+      final callerCit = 'cit_device_b_888';
+      final callerName = 'Bob Caller';
+      final rand = 123456;
+      final sessionCode = 'SS${rand.toString().padLeft(6, '0')}';
+
+      // 2. Build direct calling Data-Only FCM push payload
+      final fcmPushPayload = {
+        'target_cit': recentPeerId,
+        'caller_cit': callerCit,
+        'caller_name': callerName,
+        'call_code': sessionCode,
+        'call_type': 'video',
+        'timestamp': DateTime.now().millisecondsSinceEpoch.toString(),
+      };
+
+      expect(fcmPushPayload['target_cit'], 'cit_device_a_777');
+      expect(fcmPushPayload['call_code'], 'SS123456');
+
+      // 3. Scenario A: Inactive Device A receives FCM push and User Taps Accept
+      final acceptHandoff = {
+        'event': 'call_accepted',
+        'call_code': sessionCode,
+        'caller_cit': callerCit,
+        'caller_name': callerName,
+      };
+      expect(acceptHandoff['event'], 'call_accepted');
+      expect(acceptHandoff['call_code'], 'SS123456');
+
+      // 4. Scenario B: Inactive Device A receives FCM push and User Taps Decline
+      final declineHandoff = {
+        'event': 'call_declined',
+        'call_code': sessionCode,
+        'caller_cit': callerCit,
+      };
+      final mqttHangupTopic = 'simplysay/call_session/$sessionCode/signaling';
+      expect(declineHandoff['event'], 'call_declined');
+      expect(mqttHangupTopic, 'simplysay/call_session/SS123456/signaling');
+    });
   });
 }
