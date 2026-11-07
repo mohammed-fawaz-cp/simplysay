@@ -151,17 +151,21 @@ class FCMService {
             'cit': cit,
             'fcm_token': token,
           }),
-        ).timeout(const Duration(seconds: 4));
+        ).timeout(const Duration(seconds: 8));
 
         if (res.statusCode == 200 || res.statusCode == 201) {
+          debugPrint('✅ [FCMService] Device token registered on backend ($registerUrl) for CIT=$cit');
           developer.log('✅ [FCMService] Device token registered on backend ($registerUrl) for CIT=$cit', name: 'FCMService');
         } else {
+          debugPrint('⚠️ [FCMService] Backend returned ${res.statusCode} registering token: ${res.body}');
           developer.log('⚠️ [FCMService] Backend returned ${res.statusCode} registering token: ${res.body}', name: 'FCMService');
         }
       } catch (e) {
+        debugPrint('⚠️ [FCMService] Network error registering token on $registerUrl: $e');
         developer.log('⚠️ [FCMService] Network error registering token on $registerUrl: $e', name: 'FCMService');
       }
     } catch (e) {
+      debugPrint('⚠️ [FCMService] Error registering device token: $e');
       developer.log('⚠️ [FCMService] Error registering device token: $e', name: 'FCMService');
     }
   }

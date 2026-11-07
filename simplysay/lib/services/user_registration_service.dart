@@ -24,6 +24,7 @@ class UserRegistrationService {
     required String cit,
     required String csit,
     required String deviceId,
+    String? fcmToken,
   }) async {
     try {
       final phoneHash = computePhoneHash(rawPhoneNumber);
@@ -34,15 +35,20 @@ class UserRegistrationService {
         name: 'UserRegistrationService',
       );
 
+      final payload = <String, dynamic>{
+        'phone_hash': phoneHash,
+        'cit': cit,
+        'csit': csit,
+        'device_id': deviceId,
+      };
+      if (fcmToken != null && fcmToken.isNotEmpty) {
+        payload['fcm_token'] = fcmToken;
+      }
+
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'phone_hash': phoneHash,
-          'cit': cit,
-          'csit': csit,
-          'device_id': deviceId,
-        }),
+        body: jsonEncode(payload),
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200 || response.statusCode == 201) {

@@ -185,6 +185,13 @@ def init_server_db():
             )
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_cit ON users(cit)")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fcm_tokens (
+                cit TEXT PRIMARY KEY,
+                fcm_token TEXT NOT NULL,
+                updated_at INTEGER
+            )
+        """)
         conn.commit()
         conn.close()
     except Exception as e:
@@ -204,6 +211,13 @@ def init_server_db():
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_cit ON users(cit)")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS fcm_tokens (
+                    cit TEXT PRIMARY KEY,
+                    fcm_token TEXT NOT NULL,
+                    updated_at INTEGER
+                )
+            """)
             conn.commit()
             conn.close()
         except Exception as e2:
@@ -308,15 +322,21 @@ def sync_contacts(payload: ContactSyncRequest):
 
 @app.post("/api/v1/fcm/register-token", summary="Register Ephemeral Device FCM Token")
 def register_fcm_token(payload: RegisterFCMTokenRequest):
+    now = int(time.time())
     fcm_token_registry[payload.cit] = payload.fcm_token
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO fcm_tokens (cit, fcm_token, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(cit) DO UPDATE SET fcm_token=excluded.fcm_token, updated_at=excluded.updated_at
+        """, (payload.cit, payload.fcm_token, now))
         cursor.execute("UPDATE users SET fcm_token = ? WHERE cit = ?", (payload.fcm_token, payload.cit))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Error persisting FCM token: {e}")
 
     return {
         "status": "success",
@@ -328,14 +348,20 @@ def register_fcm_token(payload: RegisterFCMTokenRequest):
 def get_fcm_token(cit: str):
     token = fcm_token_registry.get(cit)
     if not token:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT fcm_token FROM users WHERE cit = ? LIMIT 1", (cit,))
-        row = cursor.fetchone()
-        conn.close()
-        if row and row[0]:
-            token = row[0]
-            fcm_token_registry[cit] = token
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT fcm_token FROM fcm_tokens WHERE cit = ? LIMIT 1", (cit,))
+            row = cursor.fetchone()
+            if not row:
+                cursor.execute("SELECT fcm_token FROM users WHERE cit = ? LIMIT 1", (cit,))
+                row = cursor.fetchone()
+            conn.close()
+            if row and row[0]:
+                token = row[0]
+                fcm_token_registry[cit] = token
+        except Exception:
+            pass
 
     if not token:
         raise HTTPException(status_code=404, detail="Token not found for CIT")
@@ -345,16 +371,25 @@ def get_fcm_token(cit: str):
 def send_data_call_push(payload: SendDataCallPushRequest):
     token = payload.target_token or fcm_token_registry.get(payload.target_cit or "")
     if not token and (payload.target_cit or payload.target_phone_hash):
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        if payload.target_cit:
-            cursor.execute("SELECT fcm_token FROM users WHERE cit = ? LIMIT 1", (payload.target_cit,))
-        elif payload.target_phone_hash:
-            cursor.execute("SELECT fcm_token FROM users WHERE phone_hash = ? LIMIT 1", (payload.target_phone_hash,))
-        row = cursor.fetchone()
-        conn.close()
-        if row and row[0]:
-            token = row[0]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            if payload.target_cit:
+                cursor.execute("SELECT fcm_token FROM fcm_tokens WHERE cit = ? LIMIT 1", (payload.target_cit,))
+                row = cursor.fetchone()
+                if not row:
+                    cursor.execute("SELECT fcm_token FROM users WHERE cit = ? LIMIT 1", (payload.target_cit,))
+                    row = cursor.fetchone()
+            elif payload.target_phone_hash:
+                cursor.execute("SELECT fcm_token FROM users WHERE phone_hash = ? LIMIT 1", (payload.target_phone_hash,))
+                row = cursor.fetchone()
+            conn.close()
+            if row and row[0]:
+                token = row[0]
+                if payload.target_cit:
+                    fcm_token_registry[payload.target_cit] = token
+        except Exception as e:
+            print(f"Error querying FCM token: {e}")
 
     if not token:
         raise HTTPException(status_code=404, detail="Recipient FCM token not available.")

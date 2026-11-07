@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../database/db_helper.dart';
+import '../../../services/fcm_service.dart';
 import '../../../services/token_service.dart';
 import '../../../services/mqtt_service.dart';
 import '../../../services/user_registration_service.dart';
@@ -48,12 +50,15 @@ class InitializationNotifier extends AsyncNotifier<void> {
 
       // STAGE 2: Register User Identity with FastAPI Server (MUST occur before contact sync)
       developer.log('⚡ [InitializationFlow] STAGE 2: Registering user identity with FastAPI server...', name: 'InitializationFlow');
+      final fcmToken = await FCMService.instance.getDeviceToken();
       final registered = await UserRegistrationService.registerUserOnServer(
         rawPhoneNumber: selectedPhoneNumber,
         cit: cit,
         csit: csit,
         deviceId: deviceId,
+        fcmToken: fcmToken,
       );
+      unawaited(FCMService.instance.syncDeviceToken());
 
       developer.log('✅ [InitializationFlow] STAGE 2 COMPLETE: Server Registration result=$registered', name: 'InitializationFlow');
 
@@ -99,6 +104,7 @@ class _InitializationScreenState extends ConsumerState<InitializationScreen> {
     final existingIdentity = await DatabaseHelper.instance.getClientIdentity();
     if (existingIdentity != null && mounted) {
       developer.log('✅ [InitializationScreen] Existing client identity found (CIT: ${existingIdentity['cit']}). Initializing P2P listeners...', name: 'InitializationScreen');
+      unawaited(FCMService.instance.syncDeviceToken());
       await PeerProfileExchangeService.instance.initialize();
       await WebRTCPrewarmService.instance.initialize();
 
