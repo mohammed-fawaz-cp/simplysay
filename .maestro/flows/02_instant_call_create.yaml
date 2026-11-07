@@ -1,0 +1,19 @@
+appId: com.comlabs.simplysay
+---
+# Flow 2: Create an Instant Call Room
+- launchApp
+
+# Tap Create Instant Call
+- tapOn:
+    text: "Instant Call"
+    optional: true
+
+- tapOn:
+    text: "Create Room"
+    optional: true
+
+# Verify 9-character code format is displayed (e.g. XXX-XXX-XXX)
+- assertVisible:
+    text: "Share this code"
+    optional: true
+

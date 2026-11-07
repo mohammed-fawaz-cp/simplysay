@@ -1,0 +1,19 @@
+appId: com.comlabs.simplysay
+---
+# Flow: Callee - Verify Incoming Call Notification
+# 1. Swipe down from top edge to open notification tray
+- swipe:
+    start: 50%, 0%
+    end: 50%, 75%
+    duration: 500
+
+# 2. Wait for notification to be visible
+- extendedWaitUntil:
+    visible: ".*HostUser.*|.*SimplySay.*|.*Incoming.*|.*Call.*"
+    timeout: 10000
+
+# 3. Assert Answer and Decline buttons
+- assertVisible:
+    text: "Decline"
+- assertVisible:
+    text: "Answer"

@@ -1,0 +1,31 @@
+appId: com.comlabs.simplysay
+---
+# Flow: Device A - Host Instant Call Session
+- launchApp:
+    clearState: false
+
+# 1. Wait for Flutter engine to paint (either Login or Home)
+- extendedWaitUntil:
+    visible: "Continue with Google|Host Instant Call"
+    timeout: 20000
+
+# 2. If on login screen, tap Continue with Google
+- runFlow:
+    when:
+      visible: "Continue with Google"
+    commands:
+      - tapOn: "Continue with Google"
+      - extendedWaitUntil:
+          visible: "Host Instant Call"
+          timeout: 15000
+
+# 3. Tap Host Instant Call
+- tapOn: "Host Instant Call"
+
+# 4. Verify 9-character temporary code room is created
+- extendedWaitUntil:
+    visible: "Instant Call Code"
+    timeout: 10000
+
+# 5. Verify waiting status is active
+- assertVisible: "Waiting for peer to connect..."

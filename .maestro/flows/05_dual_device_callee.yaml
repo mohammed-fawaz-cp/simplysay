@@ -1,0 +1,37 @@
+appId: com.comlabs.simplysay
+---
+# Flow: Device B - Callee / Joiner Navigation
+- launchApp:
+    clearState: false
+
+# 1. Wait for Flutter engine to paint (either Login or Home)
+- extendedWaitUntil:
+    visible: "Continue with Google|Options"
+    timeout: 20000
+
+# 2. If on login screen, tap Continue with Google
+- runFlow:
+    when:
+      visible: "Continue with Google"
+    commands:
+      - tapOn: "Continue with Google"
+      - extendedWaitUntil:
+          visible: "Options"
+          timeout: 15000
+
+# 3. Tap Options menu on Home Screen
+- tapOn: "Options"
+
+# 4. Tap Connect to Instant Call
+- extendedWaitUntil:
+    visible: "Connect to Instant Call"
+    timeout: 8000
+
+- tapOn: "Connect to Instant Call"
+
+# 5. Verify shared code entry dialog is visible
+- extendedWaitUntil:
+    visible: "Enter Shared Code"
+    timeout: 8000
+
+- assertVisible: "Enter Shared Code"

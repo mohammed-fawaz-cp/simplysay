@@ -1,0 +1,16 @@
+appId: com.comlabs.simplysay
+---
+# Flow 1: Launch App and verify Login Screen
+- launchApp:
+    clearState: false
+
+# Handle any runtime permission dialogs if shown
+- tapOn:
+    text: "While using the app"
+    optional: true
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# Assert login buttons are visible
+- assertVisible: "Continue with Google"

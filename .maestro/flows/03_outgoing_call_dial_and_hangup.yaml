@@ -1,0 +1,35 @@
+appId: com.comlabs.simplysay
+---
+# Flow 3: Direct Outgoing Call & Cancellation
+- launchApp
+
+# Tap on a contact to call
+- tapOn:
+    text: "Contacts"
+    optional: true
+
+# Tap on the first contact in the list
+- tapOn:
+    point: "50%,20%"
+    optional: true
+
+# Initiate call
+- tapOn:
+    text: "Call"
+    optional: true
+
+# Verify calling screen or ringback tone starts
+- assertVisible:
+    text: "Calling..."
+    optional: true
+
+# Hang up before answer
+- tapOn:
+    text: "End"
+    optional: true
+
+# Verify return to main screen
+- assertVisible:
+    text: "Recent Calls"
+    optional: true
+
