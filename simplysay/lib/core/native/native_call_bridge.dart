@@ -16,6 +16,11 @@ class NativeCallBridge {
 
   Stream<Map<String, dynamic>> get onCallActionStream => _callActionStreamController.stream;
 
+  void dispatchCallEvent(Map<String, dynamic> data) {
+    developer.log('⚡ [NativeCallBridge] Dispatching manual call event: $data', name: 'NativeCallBridge');
+    _callActionStreamController.add(data);
+  }
+
   bool _isListening = false;
 
   void initialize() {

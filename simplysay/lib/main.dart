@@ -13,12 +13,14 @@ import 'features/call/presentation/call_screen.dart';
 import 'services/call_signaling_service.dart';
 import 'services/fcm_service.dart';
 import 'services/mqtt_service.dart';
+import 'services/notification_service.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   NativeCallBridge.instance.initialize();
+  await NotificationService().initialize();
   await FCMService.instance.initialize();
   runApp(
     const ProviderScope(

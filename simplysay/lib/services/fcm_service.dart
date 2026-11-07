@@ -180,6 +180,7 @@ class FCMService {
     String? sdpOffer,
     String callType = 'video',
   }) async {
+    debugPrint('🚀 [FCMService] Dispatching data-only call push to targetToken=$targetToken, targetCit=$targetCit (code=$callCode, caller=$callerName)');
     developer.log('🚀 [FCMService] Dispatching data-only call push to targetToken=$targetToken, targetCit=$targetCit (code=$callCode, caller=$callerName)...', name: 'FCMService');
 
     final sendUrl = '${AppConfig.apiBaseUrl}/fcm/send-call-push';
@@ -201,13 +202,18 @@ class FCMService {
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         if (body['success'] == true) {
+          debugPrint('✅ [FCMService] Data-only call push delivered successfully via $sendUrl (message_id=${body['message_id']})');
           developer.log('✅ [FCMService] Data-only call push delivered successfully via $sendUrl (message_id=${body['message_id']})', name: 'FCMService');
           return true;
         } else {
+          debugPrint('⚠️ [FCMService] Backend push reported failure: ${body['error']}');
           developer.log('⚠️ [FCMService] Backend push reported failure: ${body['error']}', name: 'FCMService');
         }
+      } else {
+        debugPrint('⚠️ [FCMService] Backend returned status ${res.statusCode}: ${res.body}');
       }
     } catch (e) {
+      debugPrint('⚠️ [FCMService] Error dispatching push via $sendUrl: $e');
       developer.log('⚠️ [FCMService] Error dispatching push via $sendUrl: $e', name: 'FCMService');
     }
     return false;

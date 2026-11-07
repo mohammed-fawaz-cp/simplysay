@@ -3,12 +3,14 @@ package com.comlabs.simplysay.call
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import androidx.annotation.NonNull
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
-object NativeCallBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+object NativeCallBridge : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     private const val METHOD_CHANNEL_NAME = "com.comlabs.simplysay/call_bridge"
     private const val EVENT_CHANNEL_NAME = "com.comlabs.simplysay/call_events"
@@ -17,15 +19,51 @@ object NativeCallBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
     private var eventChannel: EventChannel? = null
     private var eventSink: EventChannel.EventSink? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    var appContext: Context? = null
 
-    fun registerWith(flutterEngine: FlutterEngine, context: Context) {
+    fun registerWithBinding(binding: io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding) {
+        appContext = binding.applicationContext
+        com.comlabs.simplysay.MainActivity.applicationContextInstance = binding.applicationContext
+        methodChannel = MethodChannel(binding.binaryMessenger, METHOD_CHANNEL_NAME).apply {
+            setMethodCallHandler(this@NativeCallBridge)
+        }
+        eventChannel = EventChannel(binding.binaryMessenger, EVENT_CHANNEL_NAME).apply {
+            setStreamHandler(this@NativeCallBridge)
+        }
+        CallNotificationManager.createNotificationChannel(binding.applicationContext)
+    }
+
+    override fun onAttachedToEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
+        appContext = binding.applicationContext
+        com.comlabs.simplysay.MainActivity.applicationContextInstance = binding.applicationContext
+        methodChannel = MethodChannel(binding.binaryMessenger, METHOD_CHANNEL_NAME).apply {
+            setMethodCallHandler(this@NativeCallBridge)
+        }
+        eventChannel = EventChannel(binding.binaryMessenger, EVENT_CHANNEL_NAME).apply {
+            setStreamHandler(this@NativeCallBridge)
+        }
+        CallNotificationManager.createNotificationChannel(binding.applicationContext)
+    }
+
+    override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
+        methodChannel?.setMethodCallHandler(null)
+        eventChannel?.setStreamHandler(null)
+    }
+
+    @JvmStatic
+    fun registerWith(flutterEngine: FlutterEngine, context: Context?) {
+        val ctx = context ?: appContext ?: com.comlabs.simplysay.MainActivity.applicationContextInstance
+        if (ctx != null) {
+            appContext = ctx
+            com.comlabs.simplysay.MainActivity.applicationContextInstance = ctx
+            CallNotificationManager.createNotificationChannel(ctx)
+        }
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL_NAME).apply {
             setMethodCallHandler(this@NativeCallBridge)
         }
         eventChannel = EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL_NAME).apply {
             setStreamHandler(this@NativeCallBridge)
         }
-        CallNotificationManager.createNotificationChannel(context)
     }
 
     private var ringtone: android.media.Ringtone? = null
@@ -53,11 +91,12 @@ object NativeCallBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        val targetContext = appContext ?: com.comlabs.simplysay.MainActivity.applicationContextInstance
+
         when (call.method) {
             "playRingtone" -> {
-                val appContext = com.comlabs.simplysay.MainActivity.applicationContextInstance
-                if (appContext != null) {
-                    playRingtone(appContext)
+                if (targetContext != null) {
+                    playRingtone(targetContext)
                     result.success(true)
                 } else {
                     result.error("NO_CONTEXT", "Application context not initialized", null)
@@ -74,11 +113,11 @@ object NativeCallBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
                 val sdpOffer = call.argument<String>("sdp_offer")
                 val callType = call.argument<String>("call_type") ?: "video"
 
-                // Context is obtained from Application
-                val appContext = com.comlabs.simplysay.MainActivity.applicationContextInstance
-                if (appContext != null) {
+                android.util.Log.d("NativeCallBridge", "🔔 showIncomingCall called: caller=$callerName, context=$targetContext")
+
+                if (targetContext != null) {
                     CallNotificationManager.showIncomingCallNotification(
-                        context = appContext,
+                        context = targetContext,
                         callerName = callerName,
                         callerCit = callerCit,
                         callCode = callCode,
@@ -87,14 +126,14 @@ object NativeCallBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
                     )
                     result.success(true)
                 } else {
+                    android.util.Log.e("NativeCallBridge", "❌ showIncomingCall failed: targetContext is null")
                     result.error("NO_CONTEXT", "Application context not initialized", null)
                 }
             }
             "dismissIncomingCall" -> {
                 stopRingtone()
-                val appContext = com.comlabs.simplysay.MainActivity.applicationContextInstance
-                if (appContext != null) {
-                    CallNotificationManager.dismissNotification(appContext)
+                if (targetContext != null) {
+                    CallNotificationManager.dismissNotification(targetContext)
                     result.success(true)
                 } else {
                     result.error("NO_CONTEXT", "Application context not initialized", null)

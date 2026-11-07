@@ -60,6 +60,7 @@ object CallNotificationManager {
         sdpOffer: String?,
         callType: String = "video"
     ) {
+        android.util.Log.d("CallNotificationManager", "🔔 showIncomingCallNotification triggered for $callerName (code=$callCode, cit=$callerCit)")
         createNotificationChannel(context)
 
         // 1. Full Screen Intent for Locked Screen / Screen OFF

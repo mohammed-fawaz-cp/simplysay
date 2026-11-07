@@ -52,3 +52,22 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
+tasks.matching { it.name.startsWith("compile") && it.name.contains("JavaWithJavac") }.configureEach {
+    doFirst {
+        val regFile = file("src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java")
+        if (regFile.exists()) {
+            val original = regFile.readText()
+            if (!original.contains("NativeCallBridge")) {
+                val updated = original.replace(
+                    "public static void registerWith(@NonNull FlutterEngine flutterEngine) {",
+                    "public static void registerWith(@NonNull FlutterEngine flutterEngine) {\n" +
+                    "    try {\n" +
+                    "      com.comlabs.simplysay.call.NativeCallBridge.registerWith(flutterEngine, com.comlabs.simplysay.MainApplication.getAppContext());\n" +
+                    "    } catch (Exception e) {}\n"
+                )
+                regFile.writeText(updated)
+            }
+        }
+    }
+}
+
