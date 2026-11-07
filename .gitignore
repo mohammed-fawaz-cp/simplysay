@@ -67,3 +67,7 @@ env/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md

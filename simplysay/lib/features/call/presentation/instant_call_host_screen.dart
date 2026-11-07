@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/routes/app_routes.dart';
+import '../../../services/call_signaling_service.dart';
 import 'providers/instant_call_provider.dart';
 import 'widgets/otp_code_boxes.dart';
 
@@ -23,6 +24,7 @@ class InstantCallHostScreen extends ConsumerWidget {
     // Auto-navigate Host when Peer connects over MQTT/FastAPI backend
     ref.listen<HostCallState>(hostCallProvider, (previous, next) {
       if (next.isConnected && context.mounted) {
+        if (CallSignalingService.instance.isCallActive) return;
         final cleanCode = next.code.replaceAll('-', '').trim().toUpperCase();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -53,12 +55,12 @@ class InstantCallHostScreen extends ConsumerWidget {
         elevation: 0,
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const SizedBox(height: 20),
+              const SizedBox(height: 8),
 
               // Hero Header Icon
               Container(
@@ -195,7 +197,7 @@ class InstantCallHostScreen extends ConsumerWidget {
                 ],
               ),
 
-              const Spacer(),
+              const SizedBox(height: 24),
 
               // Waiting Status Bar
               Container(

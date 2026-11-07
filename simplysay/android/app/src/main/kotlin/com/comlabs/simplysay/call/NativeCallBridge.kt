@@ -28,8 +28,45 @@ object NativeCallBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
         CallNotificationManager.createNotificationChannel(context)
     }
 
+    private var ringtone: android.media.Ringtone? = null
+
+    fun playRingtone(context: Context) {
+        try {
+            stopRingtone()
+            val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
+            ringtone = android.media.RingtoneManager.getRingtone(context, uri)
+            ringtone?.play()
+        } catch (e: Exception) {
+            android.util.Log.e("NativeCallBridge", "Error playing ringtone: $e")
+        }
+    }
+
+    fun stopRingtone() {
+        try {
+            if (ringtone?.isPlaying == true) {
+                ringtone?.stop()
+            }
+            ringtone = null
+        } catch (e: Exception) {
+            android.util.Log.e("NativeCallBridge", "Error stopping ringtone: $e")
+        }
+    }
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            "playRingtone" -> {
+                val appContext = com.comlabs.simplysay.MainActivity.applicationContextInstance
+                if (appContext != null) {
+                    playRingtone(appContext)
+                    result.success(true)
+                } else {
+                    result.error("NO_CONTEXT", "Application context not initialized", null)
+                }
+            }
+            "stopRingtone" -> {
+                stopRingtone()
+                result.success(true)
+            }
             "showIncomingCall" -> {
                 val callerName = call.argument<String>("caller_name") ?: "Someone"
                 val callerCit = call.argument<String>("caller_cit") ?: ""
@@ -54,6 +91,7 @@ object NativeCallBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
                 }
             }
             "dismissIncomingCall" -> {
+                stopRingtone()
                 val appContext = com.comlabs.simplysay.MainActivity.applicationContextInstance
                 if (appContext != null) {
                     CallNotificationManager.dismissNotification(appContext)

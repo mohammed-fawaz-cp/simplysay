@@ -13,10 +13,26 @@ class FCMAdminService:
         self._initialize()
 
     def _initialize(self):
+        import json
+        # 1. First check environment variables (ideal for Vercel, Render, Heroku)
+        env_credentials = os.getenv("FIREBASE_CREDENTIALS") or os.getenv("FCM_CREDENTIALS_JSON")
+        if env_credentials:
+            try:
+                cred_dict = json.loads(env_credentials)
+                if "private_key" in cred_dict and "\\n" in cred_dict["private_key"]:
+                    cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
+                cred = credentials.Certificate(cred_dict)
+                firebase_admin.initialize_app(cred)
+                self.is_initialized = True
+                logger.info("Firebase Admin SDK initialized successfully via environment variable.")
+                return
+            except Exception as e:
+                logger.error(f"Failed to initialize Firebase Admin SDK from environment variable: {e}")
+
+        # 2. Check credentials file path
         cred_path = settings.FCM_CREDENTIALS_PATH
         if os.path.exists(cred_path):
             try:
-                import json
                 with open(cred_path, 'r', encoding='utf-8') as f:
                     cred_dict = json.load(f)
 
@@ -27,12 +43,12 @@ class FCMAdminService:
                 cred = credentials.Certificate(cred_dict)
                 firebase_admin.initialize_app(cred)
                 self.is_initialized = True
-                logger.info("Firebase Admin SDK initialized successfully.")
+                logger.info("Firebase Admin SDK initialized successfully from file.")
             except Exception as e:
                 logger.error(f"Failed to initialize Firebase Admin SDK: {e}")
         else:
             logger.warning(
-                f"FCM credentials file not found at '{cred_path}'. "
+                f"FCM credentials file not found at '{cred_path}' and no FIREBASE_CREDENTIALS env var provided. "
                 "FCM messaging will be disabled until credentials are provided."
             )
 
@@ -55,12 +71,13 @@ class FCMAdminService:
         try:
             # Stringify all data values for FCM strict string dictionary contract
             sanitized_data = {str(k): str(v) for k, v in data.items()}
+            ttl_seconds = int(data.get("ttl_seconds", 35))
             message = messaging.Message(
                 data=sanitized_data,
                 token=target_token,
                 android=messaging.AndroidConfig(
                     priority="high",
-                    ttl=30,  # 30 seconds for live VoIP call invitations
+                    ttl=ttl_seconds,  # 35 seconds for live VoIP call invitations
                 ),
             )
             response = messaging.send(message)

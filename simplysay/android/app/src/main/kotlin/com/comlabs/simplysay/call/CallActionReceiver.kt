@@ -21,18 +21,21 @@ class CallActionReceiver : BroadcastReceiver() {
         val action = intent.action ?: return
         val callCode = intent.getStringExtra("call_code") ?: ""
         val callerCit = intent.getStringExtra("caller_cit") ?: ""
+        val callType = intent.getStringExtra("call_type") ?: "video"
 
-        Log.d(TAG, "⚡ Received Call Action: $action for callCode: $callCode, callerCit: $callerCit")
+        Log.d(TAG, "⚡ Received Call Action: $action for callCode: $callCode, callerCit: $callerCit, callType: $callType")
 
         when (action) {
             ACTION_DECLINE -> {
                 // 1. Instantly dismiss Notification and stop ringtone
+                NativeCallBridge.stopRingtone()
                 CallNotificationManager.dismissNotification(context)
 
                 // 2. Notify Flutter Engine if active
                 NativeCallBridge.sendCallEvent("call_declined", mapOf(
                     "call_code" to callCode,
-                    "caller_cit" to callerCit
+                    "caller_cit" to callerCit,
+                    "call_type" to callType
                 ))
 
                 // 3. Publish lightweight decentralized MQTT hangup packet directly to MQTT broker
@@ -41,10 +44,12 @@ class CallActionReceiver : BroadcastReceiver() {
                 }
             }
             ACTION_ACCEPT -> {
+                NativeCallBridge.stopRingtone()
                 CallNotificationManager.dismissNotification(context)
                 NativeCallBridge.sendCallEvent("call_accepted", mapOf(
                     "call_code" to callCode,
-                    "caller_cit" to callerCit
+                    "caller_cit" to callerCit,
+                    "call_type" to callType
                 ))
             }
         }
@@ -58,10 +63,10 @@ class CallActionReceiver : BroadcastReceiver() {
         thread(isDaemon = true) {
             try {
                 val cleanCode = callCode.replace("-", "").replace(" ", "").uppercase()
-                val topic = "simplysay/call_session/$cleanCode/signaling"
-                val payload = """{"type":"hangup","sender_cit":"$callerCit","call_code":"$cleanCode","timestamp":${System.currentTimeMillis()}}"""
+                val sessionTopic = "simplysay/call_session/$cleanCode/signaling"
+                val payload = """{"signal_type":"hangup","type":"hangup","sender_id":"callee","from_cit":"callee","call_code":"$cleanCode","timestamp":${System.currentTimeMillis()}}"""
 
-                val host = "broker.hivemq.com"
+                val host = "159.89.166.217"
                 val port = 1883
 
                 Socket(host, port).use { socket ->
@@ -74,12 +79,20 @@ class CallActionReceiver : BroadcastReceiver() {
                     out.write(connectPacket)
                     out.flush()
 
-                    // 2. MQTT PUBLISH packet (QoS 0)
-                    val publishPacket = buildMqttPublishPacket(topic, payload)
+                    // 2. MQTT PUBLISH packet to session topic (QoS 0)
+                    val publishPacket = buildMqttPublishPacket(sessionTopic, payload)
                     out.write(publishPacket)
                     out.flush()
 
-                    Log.d(TAG, "✅ [MQTT Direct Decline] Dispatched hangup to topic: $topic")
+                    // 3. Also publish to direct caller hangup topic if callerCit provided
+                    if (callerCit.isNotBlank()) {
+                        val directTopic = "simplysay/webrtc/live/hangup/$callerCit"
+                        val directPacket = buildMqttPublishPacket(directTopic, payload)
+                        out.write(directPacket)
+                        out.flush()
+                    }
+
+                    Log.d(TAG, "✅ [MQTT Direct Decline] Dispatched hangup to $sessionTopic and caller $callerCit")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ Error sending direct MQTT decline: ${e.message}")

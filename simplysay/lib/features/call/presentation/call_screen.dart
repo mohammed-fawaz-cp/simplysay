@@ -9,6 +9,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../database/db_helper.dart';
+import '../../../services/call_signaling_service.dart';
 import '../../../services/mqtt_service.dart';
 import '../../../services/webrtc_service.dart';
 import 'providers/call_screen_provider.dart';
@@ -43,6 +44,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   RTCPeerConnection? _peerConnection;
   StreamSubscription? _mqttSubscription;
   Timer? _offerRetryTimer;
+  Timer? _callerTimeoutTimer;
+  DateTime? _connectedTime;
 
   bool _isRendererInitialized = false;
   String? _myCit;
@@ -63,6 +66,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   @override
   void initState() {
     super.initState();
+    CallSignalingService.instance.isCallActive = true;
     _initCallSession();
   }
 
@@ -78,6 +82,20 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       await _requestPermissions();
       await _startLocalCamera();
       await _initWebRTC();
+
+      // Start 30-Second Caller Timeout
+      if (_isCaller) {
+        _callerTimeoutTimer?.cancel();
+        _callerTimeoutTimer = Timer(const Duration(seconds: 30), () {
+          if (!_isConnected && !_isEndingCall && mounted) {
+            developer.log('⏰ [CallScreen] Caller 30-second timeout elapsed without answer.', name: 'CallScreen');
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('No answer from $_peerName.')),
+            );
+            _handleHangup(isRemoteInitiated: false);
+          }
+        });
+      }
     } catch (e) {
       developer.log('⚠️ Error initializing WebRTC call session: $e', name: 'CallScreen');
     }
@@ -193,9 +211,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
           setState(() {
             if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
                 state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
-              _isConnected = true;
-              _connectionStatusText = 'Connected (P2P Direct)';
-              _enableSpeakerphone();
+              _markCallConnected('Connected (P2P Direct)');
             } else if (state == RTCIceConnectionState.RTCIceConnectionStateChecking) {
               _connectionStatusText = 'Negotiating connection...';
             } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
@@ -211,9 +227,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
         if (mounted) {
           setState(() {
             if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-              _isConnected = true;
-              _connectionStatusText = 'Connected (Live Media)';
-              _enableSpeakerphone();
+              _markCallConnected('Connected (Live Media)');
             }
           });
         }
@@ -228,14 +242,24 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
       // 2. Bind remote streams & tracks
       _peerConnection?.onTrack = (RTCTrackEvent event) {
-        developer.log('📹 [CallScreen] Remote track received: ${event.track.kind}, streams: ${event.streams.length}', name: 'CallScreen');
+        developer.log('📹 [CallScreen] Remote track received: ${event.track.kind}, id: ${event.track.id}, streams: ${event.streams.length}', name: 'CallScreen');
         if (event.streams.isNotEmpty) {
           _remoteStream = event.streams[0];
-          _remoteRenderer.srcObject = _remoteStream;
+        }
+        if (event.track.kind == 'video') {
+          if (_remoteStream != null && !_remoteStream!.getVideoTracks().contains(event.track)) {
+            _remoteStream!.addTrack(event.track);
+          }
+          _remoteRenderer.srcObject = _remoteStream ?? (event.streams.isNotEmpty ? event.streams[0] : null);
           if (mounted) {
             setState(() {
-              _isConnected = true;
-              _connectionStatusText = 'Connected (Live Media)';
+              _markCallConnected('Connected (Live Media)');
+            });
+          }
+        } else if (event.track.kind == 'audio') {
+          if (mounted) {
+            setState(() {
+              _markCallConnected('Connected (Live Media)');
             });
           }
         }
@@ -247,8 +271,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
         _remoteRenderer.srcObject = _remoteStream;
         if (mounted) {
           setState(() {
-            _isConnected = true;
-            _connectionStatusText = 'Connected (Live Media)';
+            _markCallConnected('Connected (Live Media)');
           });
         }
       };
@@ -303,6 +326,16 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     } catch (e) {
       developer.log('⚠️ [CallScreen] WebRTC setup error: $e', name: 'CallScreen');
     }
+  }
+
+  void _markCallConnected(String status) {
+    if (!_isConnected) {
+      _callerTimeoutTimer?.cancel();
+      _connectedTime = DateTime.now();
+      _isConnected = true;
+    }
+    _connectionStatusText = status;
+    _enableSpeakerphone();
   }
 
   void _enableSpeakerphone() {
@@ -410,8 +443,14 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       final fromCit = data['from_cit'] as String? ?? data['sender_id'] as String?;
       if (fromCit == _myCit) return; // Ignore our own broadcast
 
+      final signalType = (data['signal_type'] as String?) ?? (data['type'] as String?);
+
+      if (signalType == 'hangup' || signalType == 'bye' || signalType == 'call_declined' || signalType == 'declined') {
+        _processIncomingSignal('hangup', data);
+        return;
+      }
+
       if (topic == 'simplysay/call_session/$_callCode/signaling') {
-        final signalType = data['signal_type'] as String?;
         if (signalType != null) {
           _processIncomingSignal(signalType, data);
         }
@@ -432,8 +471,20 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   }
 
   Future<void> _processIncomingSignal(String signalType, Map<String, dynamic> data) async {
-    if (_peerConnection == null) return;
     final fromCit = data['from_cit'] as String? ?? data['sender_id'] as String?;
+
+    if (signalType == 'hangup' || signalType == 'bye' || signalType == 'call_declined' || signalType == 'declined') {
+      developer.log('🛑 [CallScreen] Received hangup/decline signal from $fromCit', name: 'CallScreen');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$_peerName declined the call.')),
+        );
+      }
+      await _handleHangup(isRemoteInitiated: true);
+      return;
+    }
+
+    if (_peerConnection == null) return;
 
     if (_peerCit == null || _peerCit!.isEmpty) {
       _peerCit = fromCit;
@@ -536,6 +587,16 @@ class _CallScreenState extends ConsumerState<CallScreen> {
           }
           break;
 
+        case 'busy':
+          developer.log('🛑 [CallScreen] Remote peer reported busy.', name: 'CallScreen');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('$_peerName is busy on another call.')),
+            );
+          }
+          _handleHangup(isRemoteInitiated: true);
+          break;
+
         case 'ice':
           final candMap = data['candidate'] as Map<String, dynamic>?;
           if (candMap != null) {
@@ -567,12 +628,27 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     }
 
     _offerRetryTimer?.cancel();
+    _callerTimeoutTimer?.cancel();
     _mqttSubscription?.cancel();
+    CallSignalingService.instance.isCallActive = false;
+    CallSignalingService.instance.currentDialingPeerCit = null;
 
     // Save recent call to database
     if (_peerCit != null && _peerCit!.isNotEmpty) {
       try {
-        await DatabaseHelper.instance.savePeer(peerId: _peerCit!, name: _peerName);
+        final durationSec = _connectedTime != null
+            ? DateTime.now().difference(_connectedTime!).inSeconds
+            : 0;
+        final status = _isConnected
+            ? 'COMPLETED'
+            : (isRemoteInitiated ? 'REJECTED' : (_isCaller ? 'MISSED' : 'REJECTED'));
+        await DatabaseHelper.instance.insertCallRecord(
+          peerCit: _peerCit!,
+          peerName: _peerName,
+          direction: _isCaller ? 'outgoing' : 'incoming',
+          status: status,
+          durationSeconds: durationSec,
+        );
       } catch (_) {}
     }
 
@@ -636,6 +712,9 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
   @override
   void dispose() {
+    _callerTimeoutTimer?.cancel();
+    CallSignalingService.instance.isCallActive = false;
+    CallSignalingService.instance.currentDialingPeerCit = null;
     _offerRetryTimer?.cancel();
     _mqttSubscription?.cancel();
     _peerConnection?.close();
@@ -667,9 +746,13 @@ class _CallScreenState extends ConsumerState<CallScreen> {
             // 1. Main Video Background (Remote Peer WebRTC Stream or Avatar Fallback)
             // -------------------------------------------------------------------
             Positioned.fill(
-              child: (_isRendererInitialized && _remoteRenderer.srcObject != null)
+              child: (_isRendererInitialized &&
+                      _remoteRenderer.srcObject != null &&
+                      _remoteStream != null &&
+                      _remoteStream!.getVideoTracks().isNotEmpty)
                   ? RTCVideoView(
                       _remoteRenderer,
+                      mirror: false,
                       objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                     )
                   : Container(

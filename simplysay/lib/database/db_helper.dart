@@ -42,6 +42,18 @@ class DatabaseHelper {
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS call_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        peer_cit TEXT NOT NULL,
+        peer_name TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        status TEXT NOT NULL,
+        duration_seconds INTEGER DEFAULT 0,
+        timestamp INTEGER NOT NULL
+      )
+    ''');
     developer.log('✅ [DatabaseHelper._initDB] SQLite database initialized successfully.', name: 'DatabaseHelper');
     return db;
   }
@@ -544,6 +556,48 @@ class DatabaseHelper {
       return res.first['value'] as String?;
     }
     return null;
+  }
+
+  /// Inserts a call event into the local call_history table
+  Future<void> insertCallRecord({
+    required String peerCit,
+    required String peerName,
+    required String direction, // 'incoming' or 'outgoing'
+    required String status,    // 'COMPLETED', 'MISSED', 'REJECTED'
+    int durationSeconds = 0,
+    int? timestamp,
+  }) async {
+    if (kIsWeb) return;
+    final db = await database;
+    if (db == null) return;
+    final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch;
+    await db.insert(
+      'call_history',
+      {
+        'peer_cit': peerCit,
+        'peer_name': peerName,
+        'direction': direction,
+        'status': status,
+        'duration_seconds': durationSeconds,
+        'timestamp': ts,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    await savePeer(peerId: peerCit, name: peerName);
+    developer.log('📜 [DatabaseHelper.insertCallRecord] Recorded call: $direction $status ($durationSeconds s) with $peerName', name: 'DatabaseHelper');
+  }
+
+  /// Retrieves all recorded calls ordered by most recent first
+  Future<List<Map<String, dynamic>>> getCallHistory() async {
+    if (kIsWeb) return [];
+    final db = await database;
+    if (db == null) return [];
+    try {
+      return await db.query('call_history', orderBy: 'timestamp DESC');
+    } catch (e) {
+      developer.log('⚠️ [DatabaseHelper.getCallHistory] Error reading call_history: $e', name: 'DatabaseHelper');
+      return [];
+    }
   }
 
   Future<void> close() async {

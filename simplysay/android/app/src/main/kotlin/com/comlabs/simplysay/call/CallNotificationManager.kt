@@ -22,6 +22,9 @@ object CallNotificationManager {
     private const val CHANNEL_NAME = "SimplySay Incoming Calls"
     const val NOTIFICATION_ID = 2026
 
+    private var timeoutHandler: android.os.Handler? = null
+    private var timeoutRunnable: Runnable? = null
+
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
@@ -80,6 +83,7 @@ object CallNotificationManager {
             action = CallActionReceiver.ACTION_DECLINE
             putExtra("call_code", callCode)
             putExtra("caller_cit", callerCit)
+            putExtra("call_type", callType)
         }
         val declinePendingIntent = PendingIntent.getBroadcast(
             context,
@@ -142,9 +146,25 @@ object CallNotificationManager {
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIFICATION_ID, builder.build())
+
+        // 20-Second Callee Timeout Auto-Dismiss
+        timeoutHandler?.removeCallbacksAndMessages(null)
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        timeoutHandler = mainHandler
+        val runnable = Runnable {
+            dismissNotification(context)
+            NativeCallBridge.sendCallEvent("call_missed", mapOf(
+                "call_code" to callCode,
+                "caller_cit" to callerCit,
+                "caller_name" to callerName
+            ))
+        }
+        timeoutRunnable = runnable
+        mainHandler.postDelayed(runnable, 20000L)
     }
 
     fun dismissNotification(context: Context) {
+        timeoutHandler?.removeCallbacksAndMessages(null)
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(NOTIFICATION_ID)
     }

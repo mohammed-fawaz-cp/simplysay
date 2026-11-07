@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import '../../database/db_helper.dart';
 
 /// Flutter Bridge to Android Native Call Notification & Full-Screen UI subsystem
 class NativeCallBridge {
@@ -27,6 +28,21 @@ class NativeCallBridge {
               final mapped = Map<String, dynamic>.from(event);
               developer.log('⚡ [NativeCallBridge] Received native call event: $mapped', name: 'NativeCallBridge');
               _callActionStreamController.add(mapped);
+
+              final action = mapped['action'] ?? mapped['type'];
+              if (action == 'call_missed') {
+                final callerCit = (mapped['caller_cit'] ?? '').toString();
+                final callerName = (mapped['caller_name'] ?? 'Peer User').toString();
+                if (callerCit.isNotEmpty) {
+                  DatabaseHelper.instance.insertCallRecord(
+                    peerCit: callerCit,
+                    peerName: callerName,
+                    direction: 'incoming',
+                    status: 'MISSED',
+                    durationSeconds: 0,
+                  );
+                }
+              }
             }
           },
           onError: (dynamic error) {
@@ -67,10 +83,39 @@ class NativeCallBridge {
     return false;
   }
 
+  /// Plays the system incoming call ringtone (used when app is in foreground)
+  Future<bool> playRingtone() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final res = await _methodChannel.invokeMethod<bool>('playRingtone');
+        return res ?? true;
+      } catch (e) {
+        developer.log('⚠️ [NativeCallBridge] Error playing ringtone: $e', name: 'NativeCallBridge');
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /// Stops any actively playing incoming call ringtone
+  Future<bool> stopRingtone() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final res = await _methodChannel.invokeMethod<bool>('stopRingtone');
+        return res ?? true;
+      } catch (e) {
+        developer.log('⚠️ [NativeCallBridge] Error stopping ringtone: $e', name: 'NativeCallBridge');
+        return false;
+      }
+    }
+    return false;
+  }
+
   /// Dismisses the native call notification and stops ringing
   Future<bool> dismissIncomingCall() async {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       try {
+        await stopRingtone();
         final res = await _methodChannel.invokeMethod<bool>('dismissIncomingCall');
         return res ?? true;
       } catch (e) {

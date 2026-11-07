@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../database/db_helper.dart';
+import '../../../../services/call_signaling_service.dart';
 
 /// Immutable State for Profile Setup
 class ProfileSetupState {
@@ -112,6 +113,8 @@ class ProfileSetupNotifier extends StateNotifier<ProfileSetupState> {
         displayName: trimmedName,
         profileImageBase64: state.imageBase64,
       );
+
+      CallSignalingService.instance.initGlobalIncomingCallListener();
 
       developer.log('✅ [ProfileSetupNotifier] Profile saved successfully.', name: 'ProfileSetupNotifier');
       return true;

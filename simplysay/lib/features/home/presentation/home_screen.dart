@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/routes/app_routes.dart';
-import '../../../database/db_helper.dart';
-import '../../../services/fcm_service.dart';
+import '../../../services/call_signaling_service.dart';
 import '../../contacts/presentation/contacts_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../domain/models/call_record.dart';
@@ -44,6 +43,7 @@ class _HomeRecentViewState extends ConsumerState<HomeRecentView> {
     super.initState();
     Future.microtask(() {
       ref.read(recentCallsNotifierProvider.notifier).loadRecentCalls();
+      CallSignalingService.instance.initGlobalIncomingCallListener();
     });
   }
 
@@ -178,35 +178,21 @@ class _HomeRecentViewState extends ConsumerState<HomeRecentView> {
   }
 
   Future<void> _initiateDirectCall(BuildContext context, CallRecord record) async {
-    final identity = await DatabaseHelper.instance.getClientIdentity();
-    final myCit = identity?['cit'] as String? ?? 'user_${DateTime.now().millisecondsSinceEpoch % 100000}';
-    final myName = identity?['display_name'] as String? ?? 'Caller';
-
-    // Generate 9-character session code
-    final rand = DateTime.now().millisecondsSinceEpoch;
-    final cleanCode = 'SS${(rand % 1000000).toString().padLeft(6, '0')}';
-
-    // Dispatch Data-Only FCM push to wake up recipient
-    FCMService.instance.sendDataCallPush(
-      targetCit: record.id,
-      callerCit: myCit,
-      callerName: myName,
-      callCode: cleanCode,
-      callType: 'video',
-    );
-
-    if (context.mounted) {
-      Navigator.of(context).pushNamed(
-        AppRoutes.call,
-        arguments: {
-          'peerName': record.name,
-          'peerCit': record.id,
-          'myCit': myCit,
-          'callCode': cleanCode,
-          'isCaller': true,
-        },
+    final peerCit = record.id.trim();
+    if (peerCit.isEmpty || peerCit == 'peer_1') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot initiate call: Peer ID is unavailable. Connect via Instant Call first.'),
+          backgroundColor: Colors.orange,
+        ),
       );
+      return;
     }
+    await CallSignalingService.instance.startDirectCall(
+      context: context,
+      peerCit: peerCit,
+      peerName: record.name,
+    );
   }
 }
 

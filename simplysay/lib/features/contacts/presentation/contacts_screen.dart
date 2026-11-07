@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../database/db_helper.dart';
+import '../../../../services/call_signaling_service.dart';
 import 'providers/synced_contacts_provider.dart';
 
 /// ContactsScreen: Riverpod ConsumerWidget displaying local SQLite synced contacts.
@@ -45,6 +45,45 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         });
       }
     } catch (_) {}
+  }
+
+  Future<void> _callContact(BuildContext context, Map<String, dynamic> contact) async {
+    final displayName = (contact['display_name'] ?? contact['name'] ?? 'Unknown').toString();
+    String cit = (contact['cit'] as String?)?.trim() ?? '';
+    if (cit.isEmpty) {
+      cit = (contact['peer_id'] as String?)?.trim() ?? '';
+    }
+    if (cit.isEmpty) {
+      // Look up in peers table by name
+      final peers = await DatabaseHelper.instance.getPeers();
+      final match = peers.firstWhere(
+        (p) => (p['name'] as String?)?.trim().toLowerCase() == displayName.toLowerCase(),
+        orElse: () => {},
+      );
+      if (match.isNotEmpty) {
+        cit = (match['peer_id'] ?? match['id'] ?? '').toString().trim();
+      }
+    }
+
+    if (cit.isEmpty || cit.length < 5) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Cannot call $displayName: Contact is not yet paired. Connect via Instant Call first.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (context.mounted) {
+      await CallSignalingService.instance.startDirectCall(
+        context: context,
+        peerCit: cit,
+        peerName: displayName,
+      );
+    }
   }
 
   @override
@@ -375,11 +414,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                                     return Column(
                                       children: [
                                         InkWell(
-                                          onTap: () {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text('Contact: $displayName ($phone)')),
-                                            );
-                                          },
+                                          onTap: () => _callContact(context, contact),
                                           borderRadius: BorderRadius.vertical(
                                             top: index == 0 ? const Radius.circular(16) : Radius.zero,
                                             bottom: isLast ? const Radius.circular(16) : Radius.zero,
@@ -480,17 +515,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                                                 IconButton(
                                                   icon: Icon(Icons.videocam_outlined, size: 24, color: subtitleColor),
                                                   tooltip: 'Video Call $displayName',
-                                                  onPressed: () {
-                                                    final cit = (contact['cit'] ?? contact['peer_id'] ?? contact['id']) as String?;
-                                                    Navigator.of(context).pushNamed(
-                                                      AppRoutes.call,
-                                                      arguments: {
-                                                        'peerName': displayName,
-                                                        'peerCit': cit,
-                                                        'isCaller': true,
-                                                      },
-                                                    );
-                                                  },
+                                                  onPressed: () => _callContact(context, contact),
                                                 ),
                                               ],
                                             ),

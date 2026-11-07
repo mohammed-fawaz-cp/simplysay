@@ -13,6 +13,38 @@ class InstantCallJoinScreen extends ConsumerWidget {
     final joinState = ref.watch(joinCallProvider);
     final joinNotifier = ref.read(joinCallProvider.notifier);
 
+    // Listen for Host accept or decline signals
+    ref.listen<JoinCallState>(joinCallProvider, (previous, next) {
+      if (next.isAccepted && context.mounted) {
+        final cleanCode = next.callCode ?? next.code.replaceAll('-', '').trim().toUpperCase();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Host ${next.hostName} accepted! Directing to call...'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        Navigator.of(context).pushReplacementNamed(
+          AppRoutes.call,
+          arguments: {
+            'peerName': next.hostName,
+            'peerCit': next.hostId,
+            'myCit': next.myCit,
+            'callCode': cleanCode,
+            'isCaller': false,
+          },
+        );
+      } else if (next.errorMessage != null && !next.isWaitingForHost && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.errorMessage!),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    });
+
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -23,12 +55,12 @@ class InstantCallJoinScreen extends ConsumerWidget {
         elevation: 0,
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
 
               // Hero Header Icon
               Container(
@@ -106,65 +138,122 @@ class InstantCallJoinScreen extends ConsumerWidget {
 
               const SizedBox(height: 32),
 
-              // Join Call Button
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton.icon(
-                  onPressed: joinState.isConnecting
-                      ? null
-                      : () async {
-                          final success = await joinNotifier.joinCall();
-                          if (success && context.mounted) {
-                            final latestJoinState = ref.read(joinCallProvider);
-                            final cleanCode = latestJoinState.callCode ?? latestJoinState.code.replaceAll('-', '').trim().toUpperCase();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Connection established! Directing to call...'),
-                                duration: Duration(seconds: 2),
-                              ),
-                            );
-                            // Navigate to WebRTC active call screen with peer info
-                            Navigator.of(context).pushReplacementNamed(
-                              AppRoutes.call,
-                              arguments: {
-                                'peerName': latestJoinState.hostName,
-                                'peerCit': latestJoinState.hostId,
-                                'myCit': latestJoinState.myCit,
-                                'callCode': cleanCode,
-                                'isCaller': false,
-                              },
-                            );
-                          }
-                        },
-                  icon: joinState.isConnecting
-                      ? SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: theme.colorScheme.onPrimary,
-                          ),
-                        )
-                      : const Icon(Icons.call, size: 20),
-                  label: Text(
-                    joinState.isConnecting ? 'Connecting...' : 'Join Call',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+              if (joinState.isWaitingForHost) ...[
+                // Waiting for Host acceptance card
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.5)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.colorScheme.primary,
-                    foregroundColor: theme.colorScheme.onPrimary,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Flexible(
+                            child: Text(
+                              'Calling ${joinState.hostName}...',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Ringing host device. Waiting for acceptance...',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => joinNotifier.cancelCall(),
+                          icon: const Icon(Icons.close, color: Colors.red, size: 18),
+                          label: const Text('Cancel Call', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.red),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                // Join Call Button
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton.icon(
+                    onPressed: joinState.isConnecting
+                        ? null
+                        : () async {
+                            final success = await joinNotifier.joinCall();
+                            if (!success && context.mounted && joinState.errorMessage != null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(joinState.errorMessage!),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          },
+                    icon: joinState.isConnecting
+                        ? SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: theme.colorScheme.onPrimary,
+                            ),
+                          )
+                        : const Icon(Icons.call, size: 20),
+                    label: Text(
+                      joinState.isConnecting ? 'Connecting...' : 'Join Call',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: theme.colorScheme.primary,
+                      foregroundColor: theme.colorScheme.onPrimary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
 
-              const Spacer(),
+              const SizedBox(height: 24),
             ],
           ),
         ),

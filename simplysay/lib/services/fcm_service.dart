@@ -91,7 +91,6 @@ class FCMService {
         developer.log('📩 [FCM Foreground] Received data message: ${message.data}', name: 'FCMService');
         if (message.data['type'] == 'incoming_call') {
           final data = message.data;
-          _incomingCallStreamController.add(Map<String, dynamic>.from(data));
           NativeCallBridge.instance.showIncomingCall(
             callerName: data['caller_name'] ?? 'Someone',
             callerCit: data['caller_cit'] ?? '',
@@ -142,29 +141,25 @@ class FCMService {
       // Save token in local SQLite settings
       await DatabaseHelper.instance.setSetting('fcm_token', token);
 
-      // Register token on backend for ephemeral routing
-      final endpoints = [
-        'http://127.0.0.1:8000/api/v1/fcm/register-token',
-        'http://localhost:8000/api/v1/fcm/register-token',
-        '${AppConfig.apiBaseUrl}/fcm/register-token',
-      ];
+      // Register token on backend
+      final registerUrl = '${AppConfig.apiBaseUrl}/fcm/register-token';
+      try {
+        final res = await http.post(
+          Uri.parse(registerUrl),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'cit': cit,
+            'fcm_token': token,
+          }),
+        ).timeout(const Duration(seconds: 4));
 
-      for (final url in endpoints) {
-        try {
-          final res = await http.post(
-            Uri.parse(url),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'cit': cit,
-              'fcm_token': token,
-            }),
-          ).timeout(const Duration(seconds: 2));
-
-          if (res.statusCode == 200) {
-            developer.log('✅ [FCMService] Device token registered on backend ($url) for CIT=$cit', name: 'FCMService');
-            break;
-          }
-        } catch (_) {}
+        if (res.statusCode == 200 || res.statusCode == 201) {
+          developer.log('✅ [FCMService] Device token registered on backend ($registerUrl) for CIT=$cit', name: 'FCMService');
+        } else {
+          developer.log('⚠️ [FCMService] Backend returned ${res.statusCode} registering token: ${res.body}', name: 'FCMService');
+        }
+      } catch (e) {
+        developer.log('⚠️ [FCMService] Network error registering token on $registerUrl: $e', name: 'FCMService');
       }
     } catch (e) {
       developer.log('⚠️ [FCMService] Error registering device token: $e', name: 'FCMService');
@@ -183,38 +178,33 @@ class FCMService {
   }) async {
     developer.log('🚀 [FCMService] Dispatching data-only call push to targetToken=$targetToken, targetCit=$targetCit (code=$callCode, caller=$callerName)...', name: 'FCMService');
 
-    final endpoints = [
-      'http://127.0.0.1:8000/api/v1/fcm/send-call-push',
-      'http://localhost:8000/api/v1/fcm/send-call-push',
-      '${AppConfig.apiBaseUrl}/fcm/send-call-push',
-    ];
+    final sendUrl = '${AppConfig.apiBaseUrl}/fcm/send-call-push';
+    try {
+      final res = await http.post(
+        Uri.parse(sendUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'target_token': targetToken ?? '',
+          'target_cit': targetCit ?? '',
+          'caller_cit': callerCit,
+          'caller_name': callerName,
+          'call_code': callCode,
+          'sdp_offer': sdpOffer ?? '',
+          'call_type': callType,
+        }),
+      ).timeout(const Duration(seconds: 5));
 
-    for (final url in endpoints) {
-      try {
-        final res = await http.post(
-          Uri.parse(url),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'target_token': targetToken ?? '',
-            'target_cit': targetCit ?? '',
-            'caller_cit': callerCit,
-            'caller_name': callerName,
-            'call_code': callCode,
-            'sdp_offer': sdpOffer ?? '',
-            'call_type': callType,
-          }),
-        ).timeout(const Duration(seconds: 4));
-
-        if (res.statusCode == 200) {
-          final body = jsonDecode(res.body);
-          if (body['success'] == true) {
-            developer.log('✅ [FCMService] Data-only call push delivered successfully via $url (message_id=${body['message_id']})', name: 'FCMService');
-            return true;
-          }
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (body['success'] == true) {
+          developer.log('✅ [FCMService] Data-only call push delivered successfully via $sendUrl (message_id=${body['message_id']})', name: 'FCMService');
+          return true;
+        } else {
+          developer.log('⚠️ [FCMService] Backend push reported failure: ${body['error']}', name: 'FCMService');
         }
-      } catch (e) {
-        developer.log('⚠️ [FCMService] Error dispatching push via $url: $e', name: 'FCMService');
       }
+    } catch (e) {
+      developer.log('⚠️ [FCMService] Error dispatching push via $sendUrl: $e', name: 'FCMService');
     }
     return false;
   }

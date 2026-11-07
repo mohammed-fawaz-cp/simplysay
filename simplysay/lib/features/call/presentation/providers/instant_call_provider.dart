@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import 'package:mqtt_client/mqtt_client.dart';
-import '../../../../core/config/app_config.dart';
+import '../../../../core/native/native_call_bridge.dart';
 import '../../../../database/db_helper.dart';
+import '../../../../services/call_signaling_service.dart';
 import '../../../../services/mqtt_service.dart';
 
 class HostCallState {
@@ -14,6 +14,9 @@ class HostCallState {
   final int secondsRemaining; // 600 max (10 minutes)
   final bool isConnected;
   final bool isExpired;
+  final bool hasIncomingRequest;
+  final String? incomingPeerName;
+  final String? incomingPeerId;
   final String connectedPeerName;
   final String? connectedPeerId;
   final String? myCit;
@@ -23,6 +26,9 @@ class HostCallState {
     required this.secondsRemaining,
     this.isConnected = false,
     this.isExpired = false,
+    this.hasIncomingRequest = false,
+    this.incomingPeerName,
+    this.incomingPeerId,
     this.connectedPeerName = 'Peer User',
     this.connectedPeerId,
     this.myCit,
@@ -33,6 +39,9 @@ class HostCallState {
     int? secondsRemaining,
     bool? isConnected,
     bool? isExpired,
+    bool? hasIncomingRequest,
+    String? incomingPeerName,
+    String? incomingPeerId,
     String? connectedPeerName,
     String? connectedPeerId,
     String? myCit,
@@ -42,6 +51,9 @@ class HostCallState {
       secondsRemaining: secondsRemaining ?? this.secondsRemaining,
       isConnected: isConnected ?? this.isConnected,
       isExpired: isExpired ?? this.isExpired,
+      hasIncomingRequest: hasIncomingRequest ?? this.hasIncomingRequest,
+      incomingPeerName: incomingPeerName ?? this.incomingPeerName,
+      incomingPeerId: incomingPeerId ?? this.incomingPeerId,
       connectedPeerName: connectedPeerName ?? this.connectedPeerName,
       connectedPeerId: connectedPeerId ?? this.connectedPeerId,
       myCit: myCit ?? this.myCit,
@@ -51,16 +63,36 @@ class HostCallState {
 
 class HostCallNotifier extends StateNotifier<HostCallState> {
   Timer? _timer;
-  Timer? _statusPollTimer;
   StreamSubscription? _mqttSubscription;
-  String? _subscribedTopic;
+  StreamSubscription? _nativeCallSubscription;
+  late final String _subscribedTopic;
+  late final String _cleanCode;
 
   HostCallNotifier()
       : super(HostCallState(
           code: _generateCode(),
           secondsRemaining: 600, // 10 minutes
         )) {
+    _cleanCode = state.code.replaceAll('-', '').trim().toUpperCase();
+    _subscribedTopic = 'simplysay/instant_call/$_cleanCode';
     _startSession();
+    _listenToNativeCallActions();
+  }
+
+  void _listenToNativeCallActions() {
+    _nativeCallSubscription = NativeCallBridge.instance.onCallActionStream.listen((event) {
+      final action = event['event'] as String?;
+      developer.log('⚡ [HostCallNotifier] Native call action received: $action', name: 'HostCallNotifier');
+      if (action == 'call_accepted') {
+        if (state.hasIncomingRequest) {
+          acceptIncomingCall();
+        }
+      } else if (action == 'call_declined') {
+        if (state.hasIncomingRequest) {
+          declineIncomingCall();
+        }
+      }
+    });
   }
 
   static String _generateCode() {
@@ -74,8 +106,7 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
 
   void _startSession() {
     _startTimer();
-    _startStatusPolling();
-    _registerOnBackendAndMqtt();
+    _registerOnMqtt();
   }
 
   void _startTimer() {
@@ -83,7 +114,6 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (state.secondsRemaining <= 1) {
         timer.cancel();
-        _statusPollTimer?.cancel();
         state = state.copyWith(secondsRemaining: 0, isExpired: true);
       } else {
         state = state.copyWith(secondsRemaining: state.secondsRemaining - 1);
@@ -91,47 +121,7 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
     });
   }
 
-  void _startStatusPolling() {
-    _statusPollTimer?.cancel();
-    _statusPollTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
-      if (state.isConnected || state.isExpired) {
-        _statusPollTimer?.cancel();
-        return;
-      }
-      final cleanCode = state.code.replaceAll('-', '').trim().toUpperCase();
-      final statusUrls = [
-        'http://127.0.0.1:8000/api/v1/instant-call/status/$cleanCode',
-        'http://localhost:8000/api/v1/instant-call/status/$cleanCode',
-        '${AppConfig.apiBaseUrl}/instant-call/status/$cleanCode',
-      ];
-      for (final url in statusUrls) {
-        try {
-          final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 2));
-          if (res.statusCode == 200) {
-            final data = jsonDecode(res.body);
-            if (data['status'] == 'joined') {
-              _statusPollTimer?.cancel();
-              _timer?.cancel();
-              final peerName = data['joiner_name'] ?? 'Peer User';
-              final peerId = data['joiner_id'] ?? 'joiner_peer_${Random().nextInt(9999)}';
-              developer.log('🎉 [InstantCallHost] Joiner connection detected! Peer: $peerName ($peerId)', name: 'HostCallNotifier');
-              await DatabaseHelper.instance.savePeer(peerId: peerId, name: peerName);
-              if (mounted) {
-                state = state.copyWith(
-                  isConnected: true,
-                  connectedPeerName: peerName,
-                  connectedPeerId: peerId,
-                );
-              }
-              break;
-            }
-          }
-        } catch (_) {}
-      }
-    });
-  }
-
-  Future<void> _registerOnBackendAndMqtt() async {
+  Future<void> _registerOnMqtt() async {
     final identity = await DatabaseHelper.instance.getClientIdentity();
     String hostName = (identity?['display_name'] as String?)?.trim() ?? '';
     if (hostName.isEmpty) {
@@ -156,47 +146,16 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
       );
     }
 
-    final cleanCode = state.code.replaceAll('-', '').trim().toUpperCase();
-    _subscribedTopic = 'simplysay/instant_call/$cleanCode';
-    final roomSignalingTopic = 'simplysay/call_session/$cleanCode/signaling';
+    final roomSignalingTopic = 'simplysay/call_session/$_cleanCode/signaling';
 
     if (mounted) {
       state = state.copyWith(myCit: hostId);
     }
 
-    // 1. One-shot registration on FastAPI backend (Creates initial session entry)
-    final endpoints = [
-      'http://127.0.0.1:8000/api/v1/instant-call/create',
-      'http://localhost:8000/api/v1/instant-call/create',
-      '${AppConfig.apiBaseUrl}/instant-call/create',
-    ];
-
-    for (final url in endpoints) {
-      try {
-        final res = await http
-            .post(
-              Uri.parse(url),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'code': cleanCode,
-                'host_id': hostId,
-                'host_name': hostName,
-              }),
-            )
-            .timeout(const Duration(seconds: 2));
-        if (res.statusCode == 200) {
-          developer.log('✅ [InstantCallHost] Registered session $cleanCode on backend ($url) as hostName=$hostName', name: 'HostCallNotifier');
-          break;
-        }
-      } catch (e) {
-        // Fallback to next endpoint
-      }
-    }
-
-    // 2. Subscribe to MQTT topics for zero-polling real-time push events & early WebRTC signaling
-    MQTTService.instance.subscribe(_subscribedTopic!);
+    // Subscribe immediately to decentralized MQTT session topics
+    MQTTService.instance.subscribe(_subscribedTopic);
     MQTTService.instance.subscribe(roomSignalingTopic);
-    developer.log('⚡ [InstantCallHost] Subscribed to MQTT topics: $_subscribedTopic & $roomSignalingTopic', name: 'HostCallNotifier');
+    developer.log('⚡ [InstantCallHost] Subscribed to decentralized topics: $_subscribedTopic & $roomSignalingTopic', name: 'HostCallNotifier');
 
     _mqttSubscription?.cancel();
     _mqttSubscription = MQTTService.instance.messageStream.listen((msg) async {
@@ -206,23 +165,44 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
           final payloadStr =
               MqttPublishPayload.bytesToStringAsString(recMsg.payload.message);
           final data = jsonDecode(payloadStr);
-          if (data['type'] == 'JOINED') {
-            final peerName = data['peer_name'] ?? 'Peer User';
-            final peerId = data['peer_id'] ?? 'joiner_peer_${Random().nextInt(9999)}';
-            developer.log('🎉 [InstantCallHost] Real-time JOINED event received via MQTT! Peer: $peerName ($peerId)', name: 'HostCallNotifier');
-            _timer?.cancel();
-            _statusPollTimer?.cancel();
 
-            // Save connected peer into local storage & contacts
+          if (data['type'] == 'JOIN_REQUEST') {
+            final peerName = (data['peer_name'] as String?)?.trim() ?? 'Peer User';
+            final peerId = (data['peer_id'] ?? data['peer_cit'] as String?)?.trim() ?? 'joiner_peer_${Random().nextInt(9999)}';
+            developer.log('🔔 [InstantCallHost] Incoming Join Request via MQTT: $peerName ($peerId). Triggering ringing notification...', name: 'HostCallNotifier');
+            _timer?.cancel();
+
             await DatabaseHelper.instance.savePeer(peerId: peerId, name: peerName);
+
+            // Trigger Android native CallStyle incoming notification with ringtone
+            NativeCallBridge.instance.showIncomingCall(
+              callerName: peerName,
+              callerCit: peerId,
+              callCode: _cleanCode,
+              callType: 'instant_call',
+            );
 
             if (mounted) {
               state = state.copyWith(
-                isConnected: true,
+                hasIncomingRequest: true,
+                incomingPeerName: peerName,
+                incomingPeerId: peerId,
                 connectedPeerName: peerName,
                 connectedPeerId: peerId,
                 myCit: hostId,
               );
+            }
+          } else if (data['type'] == 'CALL_CANCELLED') {
+            developer.log('⚠️ [InstantCallHost] Joiner cancelled call request.', name: 'HostCallNotifier');
+            NativeCallBridge.instance.dismissIncomingCall();
+            CallSignalingService.instance.notifyCallCancelled(callCode: _cleanCode);
+            if (mounted) {
+              state = state.copyWith(
+                hasIncomingRequest: false,
+                incomingPeerName: null,
+                incomingPeerId: null,
+              );
+              _startTimer();
             }
           }
         } catch (e) {
@@ -232,10 +212,64 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
     });
   }
 
+  /// Host accepts incoming instant call request
+  Future<void> acceptIncomingCall() async {
+    await NativeCallBridge.instance.dismissIncomingCall();
+    final identity = await DatabaseHelper.instance.getClientIdentity();
+    final myCit = identity?['cit'] as String? ?? state.myCit ?? 'host_user';
+    final myName = identity?['display_name'] as String? ?? 'Host';
+
+    // Broadcast ACCEPTED signal over MQTT so Joiner connects
+    MQTTService.instance.publishMessage(
+      _subscribedTopic,
+      jsonEncode({
+        'type': 'CALL_ACCEPTED',
+        'host_id': myCit,
+        'host_name': myName,
+        'call_code': _cleanCode,
+      }),
+      qos: MqttQos.atLeastOnce,
+    );
+
+    if (mounted) {
+      state = state.copyWith(
+        hasIncomingRequest: false,
+        isConnected: true,
+      );
+    }
+  }
+
+  /// Host declines incoming instant call request
+  Future<void> declineIncomingCall() async {
+    await NativeCallBridge.instance.dismissIncomingCall();
+
+    // Broadcast DECLINED signal over MQTT
+    MQTTService.instance.publishMessage(
+      _subscribedTopic,
+      jsonEncode({
+        'type': 'CALL_DECLINED',
+        'call_code': _cleanCode,
+      }),
+      qos: MqttQos.atLeastOnce,
+    );
+
+    if (mounted) {
+      state = state.copyWith(
+        hasIncomingRequest: false,
+        incomingPeerName: null,
+        incomingPeerId: null,
+      );
+      _startTimer();
+    }
+  }
+
   void refreshCode() {
-    _statusPollTimer?.cancel();
+    NativeCallBridge.instance.dismissIncomingCall();
+    final newCode = _generateCode();
+    _cleanCode = newCode.replaceAll('-', '').trim().toUpperCase();
+    _subscribedTopic = 'simplysay/instant_call/$_cleanCode';
     state = HostCallState(
-      code: _generateCode(),
+      code: newCode,
       secondsRemaining: 600,
     );
     _startSession();
@@ -243,9 +277,10 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
 
   @override
   void dispose() {
+    NativeCallBridge.instance.dismissIncomingCall();
     _timer?.cancel();
-    _statusPollTimer?.cancel();
     _mqttSubscription?.cancel();
+    _nativeCallSubscription?.cancel();
     super.dispose();
   }
 }
@@ -258,6 +293,8 @@ final hostCallProvider =
 class JoinCallState {
   final String code;
   final bool isConnecting;
+  final bool isWaitingForHost;
+  final bool isAccepted;
   final String? errorMessage;
   final String hostName;
   final String? hostId;
@@ -267,6 +304,8 @@ class JoinCallState {
   const JoinCallState({
     this.code = '',
     this.isConnecting = false,
+    this.isWaitingForHost = false,
+    this.isAccepted = false,
     this.errorMessage,
     this.hostName = 'Host User',
     this.hostId,
@@ -277,6 +316,8 @@ class JoinCallState {
   JoinCallState copyWith({
     String? code,
     bool? isConnecting,
+    bool? isWaitingForHost,
+    bool? isAccepted,
     String? errorMessage,
     String? hostName,
     String? hostId,
@@ -286,6 +327,8 @@ class JoinCallState {
     return JoinCallState(
       code: code ?? this.code,
       isConnecting: isConnecting ?? this.isConnecting,
+      isWaitingForHost: isWaitingForHost ?? this.isWaitingForHost,
+      isAccepted: isAccepted ?? this.isAccepted,
       errorMessage: errorMessage,
       hostName: hostName ?? this.hostName,
       hostId: hostId ?? this.hostId,
@@ -296,6 +339,8 @@ class JoinCallState {
 }
 
 class JoinCallNotifier extends StateNotifier<JoinCallState> {
+  StreamSubscription? _mqttSubscription;
+
   JoinCallNotifier() : super(const JoinCallState());
 
   void setCode(String code) {
@@ -309,7 +354,7 @@ class JoinCallNotifier extends StateNotifier<JoinCallState> {
       return false;
     }
 
-    state = state.copyWith(isConnecting: true, errorMessage: null);
+    state = state.copyWith(isConnecting: true, isWaitingForHost: false, errorMessage: null);
 
     final identity = await DatabaseHelper.instance.getClientIdentity();
     String joinerName = (identity?['display_name'] as String?)?.trim() ?? '';
@@ -335,75 +380,97 @@ class JoinCallNotifier extends StateNotifier<JoinCallState> {
       );
     }
 
-    // 1. Verify code with FastAPI backend
-    final endpoints = [
-      'http://127.0.0.1:8000/api/v1/instant-call/join',
-      'http://localhost:8000/api/v1/instant-call/join',
-      '${AppConfig.apiBaseUrl}/instant-call/join',
-    ];
-
-    String hostName = 'Host User';
-    String hostId = 'host_user_${Random().nextInt(9999)}';
-
-    for (final url in endpoints) {
-      try {
-        final res = await http
-            .post(
-              Uri.parse(url),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'code': cleanCode,
-                'joiner_id': joinerId,
-                'joiner_name': joinerName,
-              }),
-            )
-            .timeout(const Duration(seconds: 2));
-
-        if (res.statusCode == 200) {
-          final body = jsonDecode(res.body);
-          hostName = body['host_name'] ?? 'Host User';
-          hostId = body['host_id'] ?? hostId;
-          developer.log('✅ [InstantCallJoin] Verified & joined code $cleanCode on backend ($url) as $joinerName', name: 'JoinCallNotifier');
-          break;
-        } else if (res.statusCode == 404 || res.statusCode == 410) {
-          state = state.copyWith(
-            isConnecting: false,
-            errorMessage: 'Invalid or expired Instant Call code.',
-          );
-          return false;
-        }
-      } catch (e) {
-        // Try fallback endpoint
-      }
-    }
-
-    // Save Host to local DB & Contacts & Recent Calls
-    await DatabaseHelper.instance.savePeer(peerId: hostId, name: hostName);
-
-    // Pre-subscribe to the room signaling topic
+    // 1. Subscribe to decentralized MQTT topics for this instant call session
+    final topic = 'simplysay/instant_call/$cleanCode';
     final roomSignalingTopic = 'simplysay/call_session/$cleanCode/signaling';
+    MQTTService.instance.subscribe(topic);
     MQTTService.instance.subscribe(roomSignalingTopic);
 
-    // Publish MQTT event as secondary signal
-    final topic = 'simplysay/instant_call/$cleanCode';
-    final payload = jsonEncode({
-      'type': 'JOINED',
-      'peer_id': joinerId,
-      'peer_name': joinerName,
-      'host_name': hostName,
+    _mqttSubscription?.cancel();
+    _mqttSubscription = MQTTService.instance.messageStream.listen((msg) async {
+      if (msg.topic == topic) {
+        try {
+          final recMsg = msg.payload as MqttPublishMessage;
+          final payloadStr =
+              MqttPublishPayload.bytesToStringAsString(recMsg.payload.message);
+          final data = jsonDecode(payloadStr);
+
+          if (data['type'] == 'CALL_ACCEPTED') {
+            developer.log('🎉 [InstantCallJoin] Host accepted call request! Connecting to call screen...', name: 'JoinCallNotifier');
+            final confirmedHostName = (data['host_name'] as String?)?.trim() ?? state.hostName;
+            final confirmedHostId = (data['host_id'] as String?)?.trim() ?? state.hostId ?? '';
+
+            if (confirmedHostId.isNotEmpty) {
+              await DatabaseHelper.instance.savePeer(peerId: confirmedHostId, name: confirmedHostName);
+            }
+
+            if (mounted) {
+              state = state.copyWith(
+                isConnecting: false,
+                isWaitingForHost: false,
+                isAccepted: true,
+                hostName: confirmedHostName,
+                hostId: confirmedHostId,
+                callCode: cleanCode,
+              );
+            }
+          } else if (data['type'] == 'CALL_DECLINED') {
+            developer.log('⚠️ [InstantCallJoin] Host declined call request.', name: 'JoinCallNotifier');
+            if (mounted) {
+              state = state.copyWith(
+                isConnecting: false,
+                isWaitingForHost: false,
+                errorMessage: 'Host declined the call request.',
+              );
+            }
+          }
+        } catch (e) {
+          developer.log('⚠️ [InstantCallJoin] Error parsing response: $e', name: 'JoinCallNotifier');
+        }
+      }
     });
 
-    MQTTService.instance.publishMessage(topic, payload);
-    developer.log('⚡ [InstantCallJoin] Published JOINED message to MQTT topic $topic and subscribed to $roomSignalingTopic', name: 'JoinCallNotifier');
+    // 2. Publish JOIN_REQUEST directly to host over MQTT
+    final payload = jsonEncode({
+      'type': 'JOIN_REQUEST',
+      'peer_id': joinerId,
+      'peer_cit': joinerId,
+      'peer_name': joinerName,
+      'call_code': cleanCode,
+    });
+    MQTTService.instance.publishMessage(topic, payload, qos: MqttQos.atLeastOnce);
+    developer.log('⚡ [InstantCallJoin] Published JOIN_REQUEST to $topic. Waiting for host to accept...', name: 'JoinCallNotifier');
 
     state = state.copyWith(
       isConnecting: false,
-      hostName: hostName,
-      hostId: hostId,
+      isWaitingForHost: true,
       myCit: joinerId,
       callCode: cleanCode,
     );
     return true;
+  }
+
+  void cancelCall() {
+    final cleanCode = state.code.replaceAll('-', '').trim().toUpperCase();
+    final topic = 'simplysay/instant_call/$cleanCode';
+    try {
+      MQTTService.instance.publishMessage(
+        topic,
+        jsonEncode({'type': 'CALL_CANCELLED', 'call_code': cleanCode}),
+        qos: MqttQos.atLeastOnce,
+      );
+    } catch (_) {}
+    state = state.copyWith(
+      isConnecting: false,
+      isWaitingForHost: false,
+      isAccepted: false,
+    );
+  }
+
+  @override
+  void dispose() {
+    _mqttSubscription?.cancel();
+    super.dispose();
   }
 }
 
