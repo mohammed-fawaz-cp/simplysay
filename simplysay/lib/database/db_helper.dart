@@ -54,6 +54,9 @@ class DatabaseHelper {
         timestamp INTEGER NOT NULL
       )
     ''');
+    try {
+      await db.execute('ALTER TABLE peers ADD COLUMN fcm_token TEXT');
+    } catch (_) {}
     developer.log('✅ [DatabaseHelper._initDB] SQLite database initialized successfully.', name: 'DatabaseHelper');
     return db;
   }
@@ -66,6 +69,7 @@ class DatabaseHelper {
         id TEXT PRIMARY KEY,
         name TEXT,
         peer_id TEXT NOT NULL,
+        fcm_token TEXT,
         last_seen INTEGER,
         created_at INTEGER
       )
@@ -414,8 +418,9 @@ class DatabaseHelper {
   Future<void> savePeer({
     required String peerId,
     required String name,
+    String? fcmToken,
   }) async {
-    developer.log('⚡ [DatabaseHelper.savePeer] Saving/updating connected peer (id=$peerId, name=$name)...', name: 'DatabaseHelper');
+    developer.log('⚡ [DatabaseHelper.savePeer] Saving/updating connected peer (id=$peerId, name=$name, hasToken=${fcmToken != null})...', name: 'DatabaseHelper');
     final now = DateTime.now().millisecondsSinceEpoch;
 
     if (kIsWeb) {
@@ -430,6 +435,7 @@ class DatabaseHelper {
         'cit': peerId,
         'csit': 'csit_$peerId',
         'display_name': cleanName,
+        'fcm_token': fcmToken ?? '',
         'is_simplysay_user': 1,
         'synced_at': now,
       };
@@ -454,16 +460,22 @@ class DatabaseHelper {
     );
 
     String resolvedName = name;
+    String? resolvedToken = fcmToken;
     if (existingPeers.isNotEmpty) {
       final oldName = existingPeers.first['name'] as String? ?? '';
+      final oldToken = existingPeers.first['fcm_token'] as String?;
       if ((resolvedName.isEmpty || resolvedName == 'Host User' || resolvedName == 'Joiner User') && oldName.isNotEmpty) {
         resolvedName = oldName;
+      }
+      if (resolvedToken == null || resolvedToken.isEmpty) {
+        resolvedToken = oldToken;
       }
       // Update existing peer record
       await db.update(
         'peers',
         {
           'name': resolvedName,
+          'fcm_token': resolvedToken,
           'last_seen': now,
         },
         where: 'id = ? OR peer_id = ?',
@@ -477,6 +489,7 @@ class DatabaseHelper {
           'id': peerId,
           'name': resolvedName,
           'peer_id': peerId,
+          'fcm_token': resolvedToken,
           'last_seen': now,
           'created_at': now,
         },
@@ -527,6 +540,47 @@ class DatabaseHelper {
     final db = await database;
     if (db == null) return [];
     return await db.query('peers', orderBy: 'last_seen DESC');
+  }
+
+  /// Updates a peer's cached FCM token in local SQLite DB
+  Future<void> updatePeerFcmToken(String peerCit, String fcmToken) async {
+    if (kIsWeb || fcmToken.trim().isEmpty) return;
+    final db = await database;
+    if (db == null) return;
+    try {
+      await db.update(
+        'peers',
+        {'fcm_token': fcmToken.trim()},
+        where: 'peer_id = ? OR id = ?',
+        whereArgs: [peerCit.trim(), peerCit.trim()],
+      );
+      developer.log('✅ [DatabaseHelper.updatePeerFcmToken] Updated FCM token for peer $peerCit', name: 'DatabaseHelper');
+    } catch (e) {
+      developer.log('⚠️ [DatabaseHelper.updatePeerFcmToken] Error updating token: $e', name: 'DatabaseHelper');
+    }
+  }
+
+  /// Retrieves a peer's cached FCM token from local SQLite DB
+  Future<String?> getPeerFcmToken(String peerCit) async {
+    if (kIsWeb) return null;
+    final db = await database;
+    if (db == null) return null;
+    try {
+      final res = await db.query(
+        'peers',
+        columns: ['fcm_token'],
+        where: 'peer_id = ? OR id = ?',
+        whereArgs: [peerCit.trim(), peerCit.trim()],
+        limit: 1,
+      );
+      if (res.isNotEmpty && res.first['fcm_token'] != null) {
+        final t = (res.first['fcm_token'] as String).trim();
+        if (t.isNotEmpty) return t;
+      }
+    } catch (e) {
+      developer.log('⚠️ [DatabaseHelper.getPeerFcmToken] Error querying token: $e', name: 'DatabaseHelper');
+    }
+    return null;
   }
 
   /// Saves a local key-value setting

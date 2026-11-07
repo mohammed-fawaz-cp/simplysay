@@ -249,7 +249,10 @@ class CallSignalingService {
     developer.log('📤 [CallSignalingService] Published direct call invite to simplysay/user/$targetCit/incoming_call (code=$cleanCode)', name: 'CallSignalingService');
 
     // 6. Also dispatch background FCM push as fallback
+    final peerToken = await DatabaseHelper.instance.getPeerFcmToken(targetCit);
+    developer.log('🚀 [CallSignalingService.startDirectCall] Dispatching FCM push with resolved targetToken=$peerToken for CIT=$targetCit', name: 'CallSignalingService');
     FCMService.instance.sendDataCallPush(
+      targetToken: peerToken,
       targetCit: targetCit,
       callerCit: myCit,
       callerName: myName,

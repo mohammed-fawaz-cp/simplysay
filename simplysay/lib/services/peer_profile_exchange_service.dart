@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 import 'package:mqtt_client/mqtt_client.dart';
 import '../database/db_helper.dart';
+import 'fcm_service.dart';
 import 'mqtt_service.dart';
 
 /// PeerProfileExchangeService handles encrypted P2P profile exchanges over MQTT.
@@ -93,10 +94,12 @@ class PeerProfileExchangeService {
     final identity = await DatabaseHelper.instance.getClientIdentity();
     if (identity == null) return;
 
+    final myFcmToken = await FCMService.instance.getDeviceToken() ?? '';
     final responsePayload = jsonEncode({
       'cit': _myCit,
       'display_name': identity['display_name'] ?? 'SimplySay User',
       'profile_image_base64': identity['profile_image_base64'] ?? '',
+      'fcm_token': myFcmToken,
       'is_encrypted': true,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
@@ -111,6 +114,7 @@ class PeerProfileExchangeService {
     final peerCit = data['cit'] as String?;
     final displayName = data['display_name'] as String?;
     final profileImageBase64 = data['profile_image_base64'] as String?;
+    final peerFcmToken = data['fcm_token'] as String?;
 
     if (peerCit == null || peerCit.isEmpty) return;
 
@@ -122,6 +126,9 @@ class PeerProfileExchangeService {
       profileImageBase64: profileImageBase64,
       isEncrypted: true,
     );
+    if (peerFcmToken != null && peerFcmToken.isNotEmpty) {
+      await DatabaseHelper.instance.updatePeerFcmToken(peerCit, peerFcmToken);
+    }
     developer.log('✅ [PeerProfileExchangeService._processProfileResponse] Saved contact profile to local SQLite.', name: 'PeerProfileExchangeService');
   }
 }

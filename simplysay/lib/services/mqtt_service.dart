@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import '../core/config/app_config.dart';
+import '../database/db_helper.dart';
+import 'fcm_service.dart';
 import 'mqtt/mqtt_client_factory.dart';
 
 enum MQTTConnectionState { disconnected, connecting, connected, error }
@@ -28,8 +31,8 @@ class MQTTService {
   Stream<MqttReceivedMessage<MqttMessage>> get messageStream => _messageController.stream;
 
   /// Alias for publish with default QoS
-  void publishMessage(String topic, String payload, {MqttQos qos = MqttQos.atLeastOnce}) {
-    publish(topic, payload, qos: qos);
+  void publishMessage(String topic, String payload, {MqttQos qos = MqttQos.atLeastOnce, bool retain = false}) {
+    publish(topic, payload, qos: qos, retain: retain);
   }
 
   /// Initializes and connects MQTT client with auto-reconnect support
@@ -101,6 +104,18 @@ class MQTTService {
     _client?.updates?.listen((List<MqttReceivedMessage<MqttMessage>> messages) {
       for (final msg in messages) {
         developer.log('📩 [MQTTService] Message received on topic: ${msg.topic}', name: 'MQTTService');
+        if (msg.topic.startsWith('simplysay/fcm/token/')) {
+          try {
+            final recMsg = msg.payload as MqttPublishMessage;
+            final payloadStr = MqttPublishPayload.bytesToStringAsString(recMsg.payload.message);
+            final data = jsonDecode(payloadStr);
+            final cit = data['cit'] as String?;
+            final token = data['fcm_token'] as String?;
+            if (cit != null && token != null && token.isNotEmpty) {
+              DatabaseHelper.instance.updatePeerFcmToken(cit, token);
+            }
+          } catch (_) {}
+        }
         _messageController.add(msg);
       }
     });
@@ -109,7 +124,24 @@ class MQTTService {
   void _onConnected() {
     developer.log('✅ [MQTTService] Callback: Connected to MQTT broker.', name: 'MQTTService');
     _updateState(MQTTConnectionState.connected);
+    subscribe('simplysay/fcm/token/+');
     _resubscribeAll();
+    _publishMyRetainedFcmToken();
+  }
+
+  Future<void> _publishMyRetainedFcmToken() async {
+    try {
+      final token = await FCMService.instance.getDeviceToken();
+      if (_clientId != null && token != null && token.isNotEmpty) {
+        final myCit = _clientId!.replaceFirst('simplysay_client_', '');
+        publishMessage(
+          'simplysay/fcm/token/$myCit',
+          jsonEncode({'cit': myCit, 'fcm_token': token}),
+          retain: true,
+          qos: MqttQos.atLeastOnce,
+        );
+      }
+    } catch (_) {}
   }
 
   void _resubscribeAll() {
@@ -162,7 +194,7 @@ class MQTTService {
   }
 
   /// Publish a message to a topic
-  void publish(String topic, String payload, {MqttQos qos = MqttQos.atLeastOnce}) async {
+  void publish(String topic, String payload, {MqttQos qos = MqttQos.atLeastOnce, bool retain = false}) async {
     if (_client == null || _connectionState != MQTTConnectionState.connected) {
       developer.log('⏳ [MQTTService.publish] Waiting for MQTT connection before publishing to $topic...', name: 'MQTTService');
       try {
@@ -172,8 +204,8 @@ class MQTTService {
     if (_client != null && _connectionState == MQTTConnectionState.connected) {
       final builder = MqttClientPayloadBuilder();
       builder.addString(payload);
-      _client!.publishMessage(topic, qos, builder.payload!);
-      developer.log('📤 [MQTTService.publish] Published message to topic $topic: $payload', name: 'MQTTService');
+      _client!.publishMessage(topic, qos, builder.payload!, retain: retain);
+      developer.log('📤 [MQTTService.publish] Published message to topic $topic (retain=$retain): $payload', name: 'MQTTService');
     } else {
       developer.log('❌ [MQTTService.publish] Failed to publish message to topic $topic (Not connected)', name: 'MQTTService');
     }

@@ -7,6 +7,7 @@ import 'package:mqtt_client/mqtt_client.dart';
 import '../../../../core/native/native_call_bridge.dart';
 import '../../../../database/db_helper.dart';
 import '../../../../services/call_signaling_service.dart';
+import '../../../../services/fcm_service.dart';
 import '../../../../services/mqtt_service.dart';
 
 class HostCallState {
@@ -169,10 +170,11 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
           if (data['type'] == 'JOIN_REQUEST') {
             final peerName = (data['peer_name'] as String?)?.trim() ?? 'Peer User';
             final peerId = (data['peer_id'] ?? data['peer_cit'] as String?)?.trim() ?? 'joiner_peer_${Random().nextInt(9999)}';
-            developer.log('🔔 [InstantCallHost] Incoming Join Request via MQTT: $peerName ($peerId). Triggering ringing notification...', name: 'HostCallNotifier');
+            final peerFcmToken = (data['fcm_token'] as String?)?.trim();
+            developer.log('🔔 [InstantCallHost] Incoming Join Request via MQTT: $peerName ($peerId, hasToken=${peerFcmToken != null}). Triggering ringing notification...', name: 'HostCallNotifier');
             _timer?.cancel();
 
-            await DatabaseHelper.instance.savePeer(peerId: peerId, name: peerName);
+            await DatabaseHelper.instance.savePeer(peerId: peerId, name: peerName, fcmToken: peerFcmToken);
 
             // Trigger Android native CallStyle incoming notification with ringtone
             NativeCallBridge.instance.showIncomingCall(
@@ -220,6 +222,7 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
     final myName = identity?['display_name'] as String? ?? 'Host';
 
     // Broadcast ACCEPTED signal over MQTT so Joiner connects
+    final myFcmToken = await FCMService.instance.getDeviceToken() ?? '';
     MQTTService.instance.publishMessage(
       _subscribedTopic,
       jsonEncode({
@@ -227,6 +230,7 @@ class HostCallNotifier extends StateNotifier<HostCallState> {
         'host_id': myCit,
         'host_name': myName,
         'call_code': _cleanCode,
+        'fcm_token': myFcmToken,
       }),
       qos: MqttQos.atLeastOnce,
     );
@@ -399,9 +403,10 @@ class JoinCallNotifier extends StateNotifier<JoinCallState> {
             developer.log('🎉 [InstantCallJoin] Host accepted call request! Connecting to call screen...', name: 'JoinCallNotifier');
             final confirmedHostName = (data['host_name'] as String?)?.trim() ?? state.hostName;
             final confirmedHostId = (data['host_id'] as String?)?.trim() ?? state.hostId ?? '';
+            final hostFcmToken = (data['fcm_token'] as String?)?.trim();
 
             if (confirmedHostId.isNotEmpty) {
-              await DatabaseHelper.instance.savePeer(peerId: confirmedHostId, name: confirmedHostName);
+              await DatabaseHelper.instance.savePeer(peerId: confirmedHostId, name: confirmedHostName, fcmToken: hostFcmToken);
             }
 
             if (mounted) {
@@ -431,12 +436,14 @@ class JoinCallNotifier extends StateNotifier<JoinCallState> {
     });
 
     // 2. Publish JOIN_REQUEST directly to host over MQTT
+    final myFcmToken = await FCMService.instance.getDeviceToken() ?? '';
     final payload = jsonEncode({
       'type': 'JOIN_REQUEST',
       'peer_id': joinerId,
       'peer_cit': joinerId,
       'peer_name': joinerName,
       'call_code': cleanCode,
+      'fcm_token': myFcmToken,
     });
     MQTTService.instance.publishMessage(topic, payload, qos: MqttQos.atLeastOnce);
     developer.log('⚡ [InstantCallJoin] Published JOIN_REQUEST to $topic. Waiting for host to accept...', name: 'JoinCallNotifier');
