@@ -162,24 +162,52 @@ def admin_clear_data(admin_user: str = Depends(get_current_admin)):
 # In-Memory & Ephemeral User Registry for Private Contact Discovery (Zero Persistent Server Storage)
 import sqlite3
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "server_ephemeral.db")
+# On serverless platforms (Vercel/AWS Lambda), the execution directory is read-only.
+# /tmp is the only writable directory.
+if os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+    DB_PATH = "/tmp/server_ephemeral.db"
+else:
+    DB_PATH = os.path.join(os.path.dirname(__file__), "server_ephemeral.db")
 
 def init_server_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            phone_hash TEXT PRIMARY KEY,
-            cit TEXT NOT NULL,
-            csit TEXT NOT NULL,
-            device_id TEXT NOT NULL,
-            fcm_token TEXT,
-            registered_at INTEGER
-        )
-    """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_cit ON users(cit)")
-    conn.commit()
-    conn.close()
+    global DB_PATH
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                phone_hash TEXT PRIMARY KEY,
+                cit TEXT NOT NULL,
+                csit TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                fcm_token TEXT,
+                registered_at INTEGER
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_cit ON users(cit)")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Failed to init SQLite DB at {DB_PATH}: {e}. Falling back to /tmp/server_ephemeral.db")
+        DB_PATH = "/tmp/server_ephemeral.db"
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    phone_hash TEXT PRIMARY KEY,
+                    cit TEXT NOT NULL,
+                    csit TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    fcm_token TEXT,
+                    registered_at INTEGER
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_cit ON users(cit)")
+            conn.commit()
+            conn.close()
+        except Exception as e2:
+            print(f"⚠️ Fallback to /tmp failed: {e2}")
 
 init_server_db()
 
