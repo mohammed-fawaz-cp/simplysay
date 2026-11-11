@@ -130,4 +130,22 @@ class NativeCallBridge {
     }
     return false;
   }
+
+  /// Checks if there is a pending call event that was received before Flutter attached the listener
+  Future<Map<String, dynamic>?> getPendingCallAction() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final res = await _methodChannel.invokeMethod<Map<dynamic, dynamic>>('getPendingCallAction');
+        if (res != null) {
+          final mapped = Map<String, dynamic>.from(res);
+          developer.log('📥 [NativeCallBridge.getPendingCallAction] Retrieved pending action: $mapped', name: 'NativeCallBridge');
+          return mapped;
+        }
+      } catch (e) {
+        developer.log('⚠️ [NativeCallBridge] Error getting pending call action: $e', name: 'NativeCallBridge');
+      }
+    }
+    return null;
+  }
 }
+

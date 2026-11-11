@@ -4,8 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import java.io.OutputStream
-import java.net.Socket
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.charset.StandardCharsets
 import kotlin.concurrent.thread
 
@@ -15,6 +15,7 @@ class CallActionReceiver : BroadcastReceiver() {
         const val ACTION_ACCEPT = "com.comlabs.simplysay.ACTION_ACCEPT"
         const val ACTION_DECLINE = "com.comlabs.simplysay.ACTION_DECLINE"
         private const val TAG = "CallActionReceiver"
+        private const val BACKEND_DECLINE_URL = "https://simplysay.vercel.app/api/v1/fcm/decline-call"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -38,9 +39,9 @@ class CallActionReceiver : BroadcastReceiver() {
                     "call_type" to callType
                 ))
 
-                // 3. Publish lightweight decentralized MQTT hangup packet directly to MQTT broker
-                if (callCode.isNotEmpty()) {
-                    publishMqttHangup(callCode, callerCit)
+                // 3. Dispatch secure HTTPS POST to backend to trigger MQTT decline without raw TCP sockets
+                if (callCode.isNotEmpty() || callerCit.isNotEmpty()) {
+                    sendDeclineToBackend(callCode, callerCit)
                 }
             }
             ACTION_ACCEPT -> {
@@ -56,79 +57,32 @@ class CallActionReceiver : BroadcastReceiver() {
     }
 
     /**
-     * Publishes a pure decentralized MQTT 3.1.1 Hangup packet to notify the caller
-     * even when the Flutter Dart VM is totally asleep or killed.
+     * Sends an HTTPS POST to the backend API which dispatches MQTT hangup to the caller
+     * cleanly and securely without raw TCP sockets.
      */
-    private fun publishMqttHangup(callCode: String, callerCit: String) {
+    private fun sendDeclineToBackend(callCode: String, callerCit: String) {
         thread(isDaemon = true) {
             try {
-                val cleanCode = callCode.replace("-", "").replace(" ", "").uppercase()
-                val sessionTopic = "simplysay/call_session/$cleanCode/signaling"
-                val payload = """{"signal_type":"hangup","type":"hangup","sender_id":"callee","from_cit":"callee","call_code":"$cleanCode","timestamp":${System.currentTimeMillis()}}"""
-
-                val host = "159.89.166.217"
-                val port = 1883
-
-                Socket(host, port).use { socket ->
-                    socket.soTimeout = 2000
-                    val out: OutputStream = socket.getOutputStream()
-
-                    // 1. MQTT CONNECT packet (Anonymous, clean session)
-                    val clientId = "SS_Decline_" + (System.currentTimeMillis() % 100000)
-                    val connectPacket = buildMqttConnectPacket(clientId)
-                    out.write(connectPacket)
-                    out.flush()
-
-                    // 2. MQTT PUBLISH packet to session topic (QoS 0)
-                    val publishPacket = buildMqttPublishPacket(sessionTopic, payload)
-                    out.write(publishPacket)
-                    out.flush()
-
-                    // 3. Also publish to direct caller hangup topic if callerCit provided
-                    if (callerCit.isNotBlank()) {
-                        val directTopic = "simplysay/webrtc/live/hangup/$callerCit"
-                        val directPacket = buildMqttPublishPacket(directTopic, payload)
-                        out.write(directPacket)
-                        out.flush()
-                    }
-
-                    Log.d(TAG, "✅ [MQTT Direct Decline] Dispatched hangup to $sessionTopic and caller $callerCit")
+                val url = URL(BACKEND_DECLINE_URL)
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; utf-8")
+                    setRequestProperty("Accept", "application/json")
                 }
+                val jsonPayload = """{"call_code":"$callCode","caller_cit":"$callerCit","callee_cit":"callee"}"""
+                conn.outputStream.use { os ->
+                    val bytes = jsonPayload.toByteArray(StandardCharsets.UTF_8)
+                    os.write(bytes, 0, bytes.size)
+                }
+                val code = conn.responseCode
+                Log.d(TAG, "✅ [HTTPS Decline] Dispatched decline to backend, response code: $code")
+                conn.disconnect()
             } catch (e: Exception) {
-                Log.w(TAG, "⚠️ Error sending direct MQTT decline: ${e.message}")
+                Log.w(TAG, "⚠️ [HTTPS Decline] Error dispatching decline: ${e.message}")
             }
         }
-    }
-
-    private fun buildMqttConnectPacket(clientId: String): ByteArray {
-        val clientBytes = clientId.toByteArray(StandardCharsets.UTF_8)
-        val protoName = "MQTT".toByteArray(StandardCharsets.UTF_8)
-        val variableHeader = byteArrayOf(
-            0x00, 0x04, protoName[0], protoName[1], protoName[2], protoName[3],
-            0x04, // Protocol Level (3.1.1)
-            0x02, // Clean Session flag
-            0x00, 0x3C // Keep Alive (60s)
-        )
-        val payload = ByteArray(2 + clientBytes.size).apply {
-            this[0] = (clientBytes.size shr 8).toByte()
-            this[1] = (clientBytes.size and 0xFF).toByte()
-            System.arraycopy(clientBytes, 0, this, 2, clientBytes.size)
-        }
-        val remainingLength = variableHeader.size + payload.size
-        return byteArrayOf(0x10.toByte(), remainingLength.toByte()) + variableHeader + payload
-    }
-
-    private fun buildMqttPublishPacket(topic: String, payloadStr: String): ByteArray {
-        val topicBytes = topic.toByteArray(StandardCharsets.UTF_8)
-        val payloadBytes = payloadStr.toByteArray(StandardCharsets.UTF_8)
-
-        val topicHeader = ByteArray(2 + topicBytes.size).apply {
-            this[0] = (topicBytes.size shr 8).toByte()
-            this[1] = (topicBytes.size and 0xFF).toByte()
-            System.arraycopy(topicBytes, 0, this, 2, topicBytes.size)
-        }
-
-        val remainingLength = topicHeader.size + payloadBytes.size
-        return byteArrayOf(0x30.toByte(), remainingLength.toByte()) + topicHeader + payloadBytes
     }
 }

@@ -3,6 +3,7 @@ package com.comlabs.simplysay.call
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.annotation.NonNull
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -12,6 +13,7 @@ import io.flutter.plugin.common.MethodChannel
 
 object NativeCallBridge : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
+    private const val TAG = "NativeCallBridge"
     private const val METHOD_CHANNEL_NAME = "com.comlabs.simplysay/call_bridge"
     private const val EVENT_CHANNEL_NAME = "com.comlabs.simplysay/call_events"
 
@@ -20,6 +22,9 @@ object NativeCallBridge : FlutterPlugin, MethodChannel.MethodCallHandler, EventC
     private var eventSink: EventChannel.EventSink? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     var appContext: Context? = null
+
+    @Volatile
+    private var pendingCallEvent: Map<String, Any?>? = null
 
     fun registerWithBinding(binding: io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding) {
         appContext = binding.applicationContext
@@ -75,7 +80,7 @@ object NativeCallBridge : FlutterPlugin, MethodChannel.MethodCallHandler, EventC
             ringtone = android.media.RingtoneManager.getRingtone(context, uri)
             ringtone?.play()
         } catch (e: Exception) {
-            android.util.Log.e("NativeCallBridge", "Error playing ringtone: $e")
+            Log.e(TAG, "Error playing ringtone: $e")
         }
     }
 
@@ -86,7 +91,7 @@ object NativeCallBridge : FlutterPlugin, MethodChannel.MethodCallHandler, EventC
             }
             ringtone = null
         } catch (e: Exception) {
-            android.util.Log.e("NativeCallBridge", "Error stopping ringtone: $e")
+            Log.e(TAG, "Error stopping ringtone: $e")
         }
     }
 
@@ -94,6 +99,12 @@ object NativeCallBridge : FlutterPlugin, MethodChannel.MethodCallHandler, EventC
         val targetContext = appContext ?: com.comlabs.simplysay.MainActivity.applicationContextInstance
 
         when (call.method) {
+            "getPendingCallAction" -> {
+                val pending = pendingCallEvent
+                pendingCallEvent = null
+                Log.d(TAG, "📥 getPendingCallAction queried, returning: $pending")
+                result.success(pending)
+            }
             "playRingtone" -> {
                 if (targetContext != null) {
                     playRingtone(targetContext)
@@ -113,7 +124,7 @@ object NativeCallBridge : FlutterPlugin, MethodChannel.MethodCallHandler, EventC
                 val sdpOffer = call.argument<String>("sdp_offer")
                 val callType = call.argument<String>("call_type") ?: "video"
 
-                android.util.Log.d("NativeCallBridge", "🔔 showIncomingCall called: caller=$callerName, context=$targetContext")
+                Log.d(TAG, "🔔 showIncomingCall called: caller=$callerName, context=$targetContext")
 
                 if (targetContext != null) {
                     CallNotificationManager.showIncomingCallNotification(
@@ -126,7 +137,7 @@ object NativeCallBridge : FlutterPlugin, MethodChannel.MethodCallHandler, EventC
                     )
                     result.success(true)
                 } else {
-                    android.util.Log.e("NativeCallBridge", "❌ showIncomingCall failed: targetContext is null")
+                    Log.e(TAG, "❌ showIncomingCall failed: targetContext is null")
                     result.error("NO_CONTEXT", "Application context not initialized", null)
                 }
             }
@@ -145,6 +156,14 @@ object NativeCallBridge : FlutterPlugin, MethodChannel.MethodCallHandler, EventC
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         this.eventSink = events
+        Log.d(TAG, "✅ onListen attached. Checking pendingCallEvent: $pendingCallEvent")
+        pendingCallEvent?.let { pending ->
+            Log.d(TAG, "🚀 Flushing pending call event to active listener: $pending")
+            mainHandler.post {
+                events?.success(pending)
+            }
+            pendingCallEvent = null
+        }
     }
 
     override fun onCancel(arguments: Any?) {
@@ -152,11 +171,23 @@ object NativeCallBridge : FlutterPlugin, MethodChannel.MethodCallHandler, EventC
     }
 
     fun sendCallEvent(eventType: String, data: Map<String, Any?>) {
+        val payload = HashMap<String, Any?>()
+        payload["event"] = eventType
+        payload.putAll(data)
+
+        if (eventType == "call_accepted") {
+            pendingCallEvent = payload
+            Log.d(TAG, "💾 Stored pending call event: $payload")
+        }
+
         mainHandler.post {
-            val payload = HashMap<String, Any?>()
-            payload["event"] = eventType
-            payload.putAll(data)
-            eventSink?.success(payload)
+            val sink = eventSink
+            if (sink != null) {
+                sink.success(payload)
+                Log.d(TAG, "⚡ Dispatched call event to active eventSink: $eventType")
+            } else {
+                Log.w(TAG, "⏳ eventSink is null; event cached in pendingCallEvent for cold-start delivery: $eventType")
+            }
         }
     }
 }

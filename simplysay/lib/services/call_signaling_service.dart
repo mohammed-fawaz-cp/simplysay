@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:mqtt_client/mqtt_client.dart';
 import '../core/native/native_call_bridge.dart';
 import '../core/routes/app_routes.dart';
@@ -321,6 +322,26 @@ class CallSignalingService {
       );
     }
     developer.log('🛑 [CallSignalingService] Published hangup to call_session, live/hangup, and user topic for caller $callerCit', name: 'CallSignalingService');
+
+    // Also dispatch HTTPS POST to backend so backend reliably publishes MQTT hangup to caller
+    try {
+      final backendUrl = Uri.parse('https://simplysay.vercel.app/api/v1/fcm/decline-call');
+      http.post(
+        backendUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'call_code': callCode,
+          'caller_cit': callerCit,
+          'callee_cit': myCit,
+        }),
+      ).timeout(const Duration(seconds: 4)).then((response) {
+        developer.log('✅ [CallSignalingService] HTTPS decline response: ${response.statusCode}', name: 'CallSignalingService');
+      }).catchError((err) {
+        developer.log('⚠️ [CallSignalingService] HTTPS decline async error: $err', name: 'CallSignalingService');
+      });
+    } catch (e) {
+      developer.log('⚠️ [CallSignalingService] Error sending HTTPS decline to backend: $e', name: 'CallSignalingService');
+    }
   }
 
   void dispose() {

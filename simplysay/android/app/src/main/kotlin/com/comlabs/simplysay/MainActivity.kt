@@ -33,9 +33,9 @@ class MainActivity : FlutterActivity() {
 
     private fun handleIncomingCallIntent(intent: Intent?) {
         if (intent == null) return
-        val action = intent.getStringExtra("action")
+        val action = intent.getStringExtra("action") ?: intent.action
         android.util.Log.d("MainActivity", "⚡ handleIncomingCallIntent action: $action")
-        if (action == "accept_call") {
+        if (action == "accept_call" || action == "com.comlabs.simplysay.ACTION_ACCEPT") {
             intent.removeExtra("action")
             val callCode = intent.getStringExtra("call_code") ?: ""
             val callerCit = intent.getStringExtra("caller_cit") ?: ""

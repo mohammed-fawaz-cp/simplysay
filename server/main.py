@@ -265,6 +265,11 @@ class SendCancelCallPushRequest(BaseModel):
     was_answered: Optional[str] = "false"
     timestamp: Optional[str] = None
 
+class DeclineCallRequest(BaseModel):
+    call_code: str
+    caller_cit: Optional[str] = ""
+    callee_cit: Optional[str] = "callee"
+
 @app.post("/api/v1/users/register", summary="Register Ephemeral User Profile with FCM Token")
 @app.post("/api/v1/user/register", summary="Register Ephemeral User Profile (alias)")
 def register_user(payload: RegisterUserRequest):
@@ -443,6 +448,76 @@ def send_cancel_call_push(payload: SendCancelCallPushRequest):
     )
     result["timestamp"] = int(time.time() * 1000)
     return result
+
+@app.post("/api/v1/fcm/decline-call", summary="Decline Call and Broadcast MQTT Hangup to Caller")
+@app.post("/api/v1/call/decline", summary="Decline Call (alias)")
+def decline_call(payload: DeclineCallRequest):
+    clean_code = payload.call_code.replace("-", "").replace(" ", "").upper()
+    callee = payload.callee_cit or "callee"
+    caller = payload.caller_cit or ""
+    now_ms = int(time.time() * 1000)
+
+    hangup_payload = json.dumps({
+        "type": "hangup",
+        "signal_type": "hangup",
+        "sender_id": callee,
+        "from_cit": callee,
+        "call_code": clean_code,
+        "timestamp": now_ms
+    })
+
+    # 1. Publish MQTT hangup packets to caller
+    try:
+        import paho.mqtt.publish as publish
+        topics = [f"simplysay/call_session/{clean_code}/signaling"]
+        if caller:
+            topics.append(f"simplysay/webrtc/live/hangup/{caller}")
+            topics.append(f"simplysay/user/{caller}/incoming_call")
+
+        msgs = [{"topic": t, "payload": hangup_payload, "qos": 1} for t in topics]
+        publish.multiple(msgs, hostname="159.89.166.217", port=1883)
+        print(f"✅ [MQTT Server Decline] Dispatched hangup to topics: {topics}")
+    except Exception as e:
+        print(f"⚠️ [MQTT Server Decline] Error publishing to MQTT: {e}")
+
+    # 2. Also send high-priority FCM cancel push if caller token available
+    if caller:
+        token = fcm_token_registry.get(caller)
+        if not token:
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute("SELECT fcm_token FROM users WHERE cit = ? LIMIT 1", (caller,))
+                row = cursor.fetchone()
+                conn.close()
+                if row and row[0]:
+                    token = row[0]
+            except Exception as e:
+                print(f"⚠️ [FCM Cancel Query] Error: {e}")
+
+        if token:
+            try:
+                fcm_service.send_data_call_push(
+                    target_token=token,
+                    data={
+                        "type": "call_cancelled",
+                        "caller_cit": callee,
+                        "caller_name": "Peer",
+                        "call_code": clean_code,
+                        "was_answered": "false",
+                        "timestamp": str(now_ms),
+                    }
+                )
+                print(f"✅ [FCM Cancel Push] Sent cancel push to caller token for {caller}")
+            except Exception as ex:
+                print(f"⚠️ [FCM Cancel Push] Error: {ex}")
+
+    return {
+        "success": True,
+        "message": f"Decline broadcasted for call {clean_code}",
+        "timestamp": now_ms
+    }
+
 
 @app.get("/debug-tokens")
 def debug_tokens():
